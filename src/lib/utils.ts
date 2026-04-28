@@ -40,6 +40,27 @@ export function getErrorMessage(error: unknown) {
   if (
     typeof error === "object" &&
     error !== null &&
+    "data" in error &&
+    typeof error.data === "object" &&
+    error.data !== null &&
+    "message" in error.data &&
+    typeof error.data.message === "string"
+  ) {
+    return error.data.message;
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "error" in error &&
+    typeof error.error === "string"
+  ) {
+    return error.error;
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
     "message" in error &&
     typeof error.message === "string"
   ) {

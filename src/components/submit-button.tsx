@@ -6,16 +6,19 @@ import { useFormStatus } from "react-dom";
 import { cn } from "@/lib/utils";
 
 type SubmitButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  loading?: boolean;
   pendingLabel?: string;
 };
 
 export function SubmitButton({
   children,
   className,
+  loading,
   pendingLabel = "Saving...",
   ...props
 }: SubmitButtonProps) {
-  const { pending } = useFormStatus();
+  const { pending: formPending } = useFormStatus();
+  const pending = loading ?? formPending;
 
   return (
     <button

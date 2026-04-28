@@ -4,6 +4,9 @@ import { useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 
+import { useAppDispatch } from "@/store/hooks";
+import { workspaceApi } from "@/store/workspace-api";
+
 export type WorkspaceOption = {
   id: string;
   name: string;
@@ -18,13 +21,21 @@ export function WorkspaceSwitcher({
   workspaces: WorkspaceOption[];
 }) {
   const router = useRouter();
+  const dispatch = useAppDispatch();
   const [, startTransition] = useTransition();
 
   useEffect(() => {
     workspaces.forEach((workspace) => {
       router.prefetch(`/workspaces/${workspace.slug}/contacts`);
+      dispatch(
+        workspaceApi.util.prefetch(
+          "getContacts",
+          { workspaceSlug: workspace.slug },
+          { ifOlderThan: 60 },
+        ),
+      );
     });
-  }, [router, workspaces]);
+  }, [dispatch, router, workspaces]);
 
   return (
     <div className="relative">
@@ -33,7 +44,15 @@ export function WorkspaceSwitcher({
         value={currentWorkspaceSlug}
         onChange={(event) => {
           const nextHref = `/workspaces/${event.target.value}/contacts`;
+          const nextWorkspaceSlug = event.target.value;
           router.prefetch(nextHref);
+          dispatch(
+            workspaceApi.util.prefetch(
+              "getContacts",
+              { workspaceSlug: nextWorkspaceSlug },
+              { force: true },
+            ),
+          );
           startTransition(() => {
             router.push(nextHref);
           });

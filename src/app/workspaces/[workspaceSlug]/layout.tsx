@@ -18,7 +18,7 @@ export default async function WorkspaceLayout({
   return (
     <div className="workspace-shell workspace-grid-lines min-h-screen">
       <WorkspacePersistor slug={workspace.slug} />
-      <div className="grid min-h-screen lg:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid min-h-screen lg:grid-cols-[272px_minmax(0,1fr)]">
         <AppSidebar
           workspaceName={workspace.name}
           workspaceSlug={workspace.slug}
