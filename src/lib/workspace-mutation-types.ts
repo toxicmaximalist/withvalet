@@ -14,6 +14,7 @@ export type UpdateContactPayload = {
   name: string;
   note?: string;
   organizationName?: string;
+  responsibleUserId?: string | null;
   role?: string;
   status: Database["public"]["Enums"]["contact_status"];
   telegram?: string;

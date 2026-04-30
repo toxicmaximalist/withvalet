@@ -1,3 +1,4 @@
+import { getActivityContentText } from "@/lib/activity-content";
 import { ACTIVITY_STATUS_LABELS, ACTIVITY_TYPE_LABELS } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
 import type { Database } from "@/types/database";
@@ -48,8 +49,8 @@ export function ActivityTimeline({
                   {formatDate(activity.activity_date)}
                 </span>
               </div>
-              <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground">
-                {activity.content}
+              <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
+                {getActivityContentText(activity.content)}
               </p>
               {activity.contactName || activity.organizationName ? (
                 <p className="mt-2 text-xs text-muted">

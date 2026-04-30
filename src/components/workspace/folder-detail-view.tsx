@@ -113,7 +113,7 @@ export function FolderDetailView({
 
       <NoticeBanner error={noticeError} success={noticeSuccess} />
 
-      <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+      <section className="grid gap-6 xl:grid-cols-[minmax(340px,0.92fr)_minmax(0,1.08fr)]">
         <div className="panel rounded-[28px] p-6">
           <h2 className="text-xl font-semibold text-foreground">Membership editor</h2>
           <p className="mt-2 text-sm text-muted">

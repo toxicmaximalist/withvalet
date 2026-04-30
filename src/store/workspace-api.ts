@@ -96,12 +96,16 @@ function applyContactPatch(
 ) {
   const nextOrganizationName = normalizeOptionalText(payload.organizationName);
   const organizationChanged = (draft.organizationName ?? null) !== nextOrganizationName;
+  const nextResponsibleUserId = payload.responsibleUserId?.trim() || null;
 
   draft.gmail = normalizeOptionalText(payload.gmail);
   draft.linkedin = normalizeOptionalText(payload.linkedin);
   draft.name = payload.name.trim();
   draft.note = normalizeOptionalText(payload.note);
   draft.organizationName = nextOrganizationName;
+  draft.responsible_user_id = nextResponsibleUserId;
+  draft.responsibleUserEmail = nextResponsibleUserId ? draft.responsibleUserEmail : null;
+  draft.responsibleUserName = nextResponsibleUserId ? draft.responsibleUserName : null;
   draft.role = normalizeOptionalText(payload.role);
   draft.status = payload.status;
   draft.telegram = normalizeOptionalText(payload.telegram);
@@ -132,6 +136,9 @@ function toContactListItem(contact: ContactDetail): ContactListItem {
     note: contact.note,
     organization_id: contact.organization_id,
     organizationName: contact.organizationName,
+    responsible_user_id: contact.responsible_user_id,
+    responsibleUserEmail: contact.responsibleUserEmail,
+    responsibleUserName: contact.responsibleUserName,
     role: contact.role,
     status: contact.status,
     telegram: contact.telegram,

@@ -2,10 +2,14 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { ArrowUpRight } from "lucide-react";
 
-import { createContactAction } from "@/actions/contacts";
+import {
+  createContactAction,
+  deleteAllContactsAction,
+  importContactsAction,
+} from "@/actions/contacts";
 import { DataTable } from "@/components/data-table";
-import { EmptyState } from "@/components/empty-state";
 import {
   FieldLabel,
   SelectInput,
@@ -19,7 +23,11 @@ import { StatusBadge } from "@/components/status-badge";
 import { SubmitButton } from "@/components/submit-button";
 import { CONTACT_STATUSES, CONTACT_STATUS_LABELS } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
-import { useGetContactsQuery, workspaceQueryOptions } from "@/store/workspace-api";
+import {
+  useGetContactsQuery,
+  useGetWorkspaceMembersQuery,
+  workspaceQueryOptions,
+} from "@/store/workspace-api";
 
 type ContactsViewProps = {
   error?: string;
@@ -33,9 +41,13 @@ export function ContactsView({
   workspaceSlug,
 }: ContactsViewProps) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const queryArg = { workspaceSlug };
   const { data, isFetching, isLoading } = useGetContactsQuery(queryArg, workspaceQueryOptions);
+  const membersQuery = useGetWorkspaceMembersQuery(queryArg, workspaceQueryOptions);
   const contacts = data ?? [];
+  const members = membersQuery.data ?? [];
 
   return (
     <div className="space-y-5">
@@ -47,16 +59,91 @@ export function ContactsView({
             {isFetching ? " · Refreshing..." : ""}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => setIsCreateModalOpen(true)}
-          className="inline-flex items-center rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-foreground hover:border-white/16 hover:bg-white/[0.04]"
-        >
-          New contact
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setIsDeleteAllModalOpen(true)}
+            disabled={!contacts.length}
+            className="inline-flex items-center rounded-xl border border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Delete all
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsImportModalOpen(true)}
+            className="inline-flex items-center rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-foreground hover:border-white/16 hover:bg-white/[0.04]"
+          >
+            Import contacts
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsCreateModalOpen(true)}
+            className="inline-flex items-center rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-foreground hover:border-white/16 hover:bg-white/[0.04]"
+          >
+            New contact
+          </button>
+        </div>
       </div>
 
       <NoticeBanner error={error} success={success} />
+
+      <Modal
+        open={isDeleteAllModalOpen}
+        onClose={() => setIsDeleteAllModalOpen(false)}
+        title="Delete all contacts"
+        description="This removes every contact in the workspace and will also delete linked outreach activity and folder assignments."
+      >
+        <form action={deleteAllContactsAction} className="space-y-5">
+          <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
+          <div className="rounded-[24px] border border-danger/20 bg-danger/10 px-4 py-4 text-sm leading-6 text-danger">
+            This action cannot be undone.
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setIsDeleteAllModalOpen(false)}
+              className="inline-flex items-center rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-foreground hover:border-white/16 hover:bg-white/[0.04]"
+            >
+              Cancel
+            </button>
+            <SubmitButton
+              className="border-danger/40 bg-danger text-white shadow-none hover:scale-100 hover:bg-[#ef4444] hover:shadow-none"
+              pendingLabel="Deleting..."
+            >
+              Delete all contacts
+            </SubmitButton>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        title="Import contacts"
+        description="Upload a CSV or Excel file. The file will be parsed with OpenAI and matched against existing contacts."
+      >
+        <form action={importContactsAction} className="space-y-4">
+          <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
+          <div>
+            <FieldLabel htmlFor="contactsImportFile">CSV or Excel file</FieldLabel>
+            <input
+              id="contactsImportFile"
+              name="file"
+              type="file"
+              accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              required
+              className="w-full rounded-2xl border border-white/10 bg-[#0f1012] px-4 py-3 text-sm text-foreground file:mr-4 file:rounded-xl file:border-0 file:bg-white/[0.08] file:px-3 file:py-2 file:text-sm file:text-foreground"
+            />
+            <p className="mt-2 text-sm leading-6 text-muted">
+              Expected columns can be flexible. OpenAI will normalize names, titles, organizations,
+              channels, statuses, and notes before import.
+            </p>
+          </div>
+          <div className="flex justify-end">
+            <SubmitButton pendingLabel="Importing...">Import contacts</SubmitButton>
+          </div>
+        </form>
+      </Modal>
 
       <Modal
         open={isCreateModalOpen}
@@ -95,6 +182,17 @@ export function ContactsView({
                 ))}
               </SelectInput>
             </div>
+          </div>
+          <div>
+            <FieldLabel htmlFor="responsibleUserId">Responsible person</FieldLabel>
+            <SelectInput id="responsibleUserId" name="responsibleUserId" defaultValue="">
+              <option value="">Unassigned</option>
+              {members.map((member) => (
+                <option key={member.userId} value={member.userId}>
+                  {member.fullName || member.email}
+                </option>
+              ))}
+            </SelectInput>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div>
@@ -151,10 +249,34 @@ export function ContactsView({
       <DataTable
         data={contacts}
         emptyState={
-          <EmptyState
-            title="No contacts yet"
-            description="Add your first contact to start building a workspace-specific pipeline."
-          />
+          <div className="panel-strong rounded-[30px] border px-8 py-10">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+              Contacts
+            </p>
+            <h3 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-foreground">
+              No contacts yet
+            </h3>
+            <p className="mt-3 max-w-xl text-sm leading-7 text-muted">
+              Start building the workspace pipeline by creating a contact manually or importing a
+              file.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setIsCreateModalOpen(true)}
+                className="inline-flex items-center rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-foreground hover:border-white/16 hover:bg-white/[0.04]"
+              >
+                New contact
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(true)}
+                className="inline-flex items-center rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-foreground hover:border-white/16 hover:bg-white/[0.04]"
+              >
+                Import contacts
+              </button>
+            </div>
+          </div>
         }
         columns={[
           {
@@ -186,10 +308,31 @@ export function ContactsView({
             ),
           },
           {
-            key: "email",
-            header: "Email",
+            key: "responsible",
+            header: "Responsible",
             render: (contact) => (
-              <span className="text-sm text-foreground">{contact.gmail || "No email"}</span>
+              <span className="text-sm text-muted">
+                {contact.responsibleUserName || contact.responsibleUserEmail || "Unassigned"}
+              </span>
+            ),
+          },
+          {
+            key: "linkedin",
+            header: "LinkedIn",
+            render: (contact) => (
+              contact.linkedin ? (
+                <Link
+                  href={contact.linkedin.startsWith("http") ? contact.linkedin : `https://${contact.linkedin}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-foreground hover:border-white/16 hover:bg-white/[0.05]"
+                >
+                  <span>LinkedIn</span>
+                  <ArrowUpRight className="size-3.5" />
+                </Link>
+              ) : (
+                <span className="text-sm text-muted">No link</span>
+              )
             ),
           },
           {

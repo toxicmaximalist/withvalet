@@ -10,6 +10,7 @@ type OrganizationRow = Database["public"]["Tables"]["organizations"]["Row"];
 type FolderRow = Database["public"]["Tables"]["folders"]["Row"];
 type ActivityRow = Database["public"]["Tables"]["outreach_activities"]["Row"];
 type WorkspaceRow = Database["public"]["Tables"]["workspaces"]["Row"];
+type WorkspaceInvitationRow = Database["public"]["Tables"]["workspace_invitations"]["Row"];
 type WorkspaceRole = Database["public"]["Enums"]["workspace_role"];
 
 export type WorkspaceSummary = WorkspaceRow & {
@@ -24,8 +25,19 @@ export type WorkspaceMemberSummary = {
   userId: string;
 };
 
+export type WorkspaceInvitationSummary = {
+  createdAt: string;
+  email: string;
+  id: string;
+  invitedByEmail: string | null;
+  invitedByName: string | null;
+  role: WorkspaceRole;
+};
+
 export type ContactListItem = ContactRow & {
   organizationName: string | null;
+  responsibleUserEmail: string | null;
+  responsibleUserName: string | null;
 };
 
 export type OrganizationListItem = OrganizationRow & {
@@ -59,6 +71,20 @@ export type FolderDetail = FolderRow & {
 
 function mapById<T extends { id: string }>(items: T[]) {
   return new Map(items.map((item) => [item.id, item]));
+}
+
+async function getWorkspaceMemberProfileMap(workspaceId: string) {
+  const members = await getWorkspaceMembers(workspaceId);
+
+  return new Map(
+    members.map((member) => [
+      member.userId,
+      {
+        email: member.email,
+        fullName: member.fullName,
+      },
+    ]),
+  );
 }
 
 export const getAccessibleWorkspaces = cache(async (userId?: string) => {
@@ -157,10 +183,74 @@ export async function getWorkspaceMembers(workspaceId: string) {
   );
 }
 
+export async function getWorkspaceInvitations(workspaceId: string) {
+  const { supabase } = await requireUser();
+
+  const { data: invitations, error: invitationsError } = await supabase
+    .from("workspace_invitations")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: true });
+
+  if (invitationsError) {
+    throw new Error(getErrorMessage(invitationsError));
+  }
+
+  const invitedByIds = [
+    ...new Set(
+      (invitations ?? [])
+        .map((invitation) => invitation.invited_by)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+
+  let profileMap = new Map<string, { email: string; full_name: string | null }>();
+
+  if (invitedByIds.length) {
+    const { data: profiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id, email, full_name")
+      .in("id", invitedByIds);
+
+    if (profilesError) {
+      throw new Error(getErrorMessage(profilesError));
+    }
+
+    profileMap = new Map(
+      (profiles ?? []).map((profile) => [
+        profile.id,
+        {
+          email: profile.email,
+          full_name: profile.full_name,
+        },
+      ]),
+    );
+  }
+
+  return (
+    (invitations as WorkspaceInvitationRow[] | null)?.map((invitation) => ({
+      createdAt: invitation.created_at,
+      email: invitation.email,
+      id: invitation.id,
+      invitedByEmail: invitation.invited_by
+        ? profileMap.get(invitation.invited_by)?.email ?? null
+        : null,
+      invitedByName: invitation.invited_by
+        ? profileMap.get(invitation.invited_by)?.full_name ?? null
+        : null,
+      role: invitation.role,
+    })) ?? []
+  ) as WorkspaceInvitationSummary[];
+}
+
 export async function getContacts(workspaceId: string) {
   const { supabase } = await requireUser();
 
-  const [{ data: contacts, error: contactsError }, { data: organizations, error: orgError }] =
+  const [
+    { data: contacts, error: contactsError },
+    { data: organizations, error: orgError },
+    responsibleProfileMap,
+  ] =
     await Promise.all([
       supabase
         .from("contacts")
@@ -168,6 +258,7 @@ export async function getContacts(workspaceId: string) {
         .eq("workspace_id", workspaceId)
         .order("created_at", { ascending: false }),
       supabase.from("organizations").select("id, name").eq("workspace_id", workspaceId),
+      getWorkspaceMemberProfileMap(workspaceId),
     ]);
 
   if (contactsError) {
@@ -187,6 +278,12 @@ export async function getContacts(workspaceId: string) {
       ...contact,
       organizationName: contact.organization_id
         ? organizationMap.get(contact.organization_id) ?? null
+        : null,
+      responsibleUserEmail: contact.responsible_user_id
+        ? responsibleProfileMap.get(contact.responsible_user_id)?.email ?? null
+        : null,
+      responsibleUserName: contact.responsible_user_id
+        ? responsibleProfileMap.get(contact.responsible_user_id)?.fullName ?? null
         : null,
     })) ?? []
   ) as ContactListItem[];
@@ -215,6 +312,7 @@ export async function getContactDetail(workspaceId: string, contactId: string) {
     { data: folderLinks, error: folderLinksError },
     { data: folders, error: foldersError },
     { data: activities, error: activitiesError },
+    responsibleProfileMap,
   ] = await Promise.all([
     supabase.from("organizations").select("id, name").eq("workspace_id", workspaceId),
     supabase
@@ -229,6 +327,7 @@ export async function getContactDetail(workspaceId: string, contactId: string) {
       .eq("workspace_id", workspaceId)
       .eq("contact_id", contactId)
       .order("activity_date", { ascending: false }),
+    getWorkspaceMemberProfileMap(workspaceId),
   ]);
 
   if (organizationsError || folderLinksError || foldersError || activitiesError) {
@@ -259,6 +358,12 @@ export async function getContactDetail(workspaceId: string, contactId: string) {
       folders?.filter((folder) => selectedFolderIds.has(folder.id)) ?? [],
     organizationName: contact.organization_id
       ? organizationMap.get(contact.organization_id) ?? null
+      : null,
+    responsibleUserEmail: contact.responsible_user_id
+      ? responsibleProfileMap.get(contact.responsible_user_id)?.email ?? null
+      : null,
+    responsibleUserName: contact.responsible_user_id
+      ? responsibleProfileMap.get(contact.responsible_user_id)?.fullName ?? null
       : null,
   } as ContactDetail;
 }
@@ -345,6 +450,7 @@ export async function getOrganizationDetail(
   const [
     { data: contacts, error: contactsError },
     { data: activities, error: activitiesError },
+    responsibleProfileMap,
   ] = await Promise.all([
     supabase
       .from("contacts")
@@ -358,6 +464,7 @@ export async function getOrganizationDetail(
       .eq("workspace_id", workspaceId)
       .eq("organization_id", organizationId)
       .order("activity_date", { ascending: false }),
+    getWorkspaceMemberProfileMap(workspaceId),
   ]);
 
   if (contactsError || activitiesError) {
@@ -377,6 +484,12 @@ export async function getOrganizationDetail(
       contacts?.map((contact) => ({
         ...contact,
         organizationName: organization.name,
+        responsibleUserEmail: contact.responsible_user_id
+          ? responsibleProfileMap.get(contact.responsible_user_id)?.email ?? null
+          : null,
+        responsibleUserName: contact.responsible_user_id
+          ? responsibleProfileMap.get(contact.responsible_user_id)?.fullName ?? null
+          : null,
       })) ?? [],
   } as OrganizationDetail;
 }
@@ -428,7 +541,12 @@ export async function getFolderDetail(workspaceId: string, folderId: string) {
     notFound();
   }
 
-  const [{ data: contacts, error: contactsError }, { data: links, error: linksError }, { data: organizations, error: organizationsError }] =
+  const [
+    { data: contacts, error: contactsError },
+    { data: links, error: linksError },
+    { data: organizations, error: organizationsError },
+    responsibleProfileMap,
+  ] =
     await Promise.all([
       supabase.from("contacts").select("*").eq("workspace_id", workspaceId).order("name"),
       supabase
@@ -437,6 +555,7 @@ export async function getFolderDetail(workspaceId: string, folderId: string) {
         .eq("workspace_id", workspaceId)
         .eq("folder_id", folderId),
       supabase.from("organizations").select("id, name").eq("workspace_id", workspaceId),
+      getWorkspaceMemberProfileMap(workspaceId),
     ]);
 
   if (contactsError || linksError || organizationsError) {
@@ -455,6 +574,12 @@ export async function getFolderDetail(workspaceId: string, folderId: string) {
       ...contact,
       organizationName: contact.organization_id
         ? organizationMap.get(contact.organization_id) ?? null
+        : null,
+      responsibleUserEmail: contact.responsible_user_id
+        ? responsibleProfileMap.get(contact.responsible_user_id)?.email ?? null
+        : null,
+      responsibleUserName: contact.responsible_user_id
+        ? responsibleProfileMap.get(contact.responsible_user_id)?.fullName ?? null
         : null,
     })) ?? [];
 

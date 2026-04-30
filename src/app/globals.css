@@ -80,15 +80,22 @@ body {
 }
 
 .sidebar-rail {
-  width: 272px;
-  min-width: 272px;
+  position: relative;
+  width: 84px;
+  height: 100vh;
+  min-width: 84px;
+  flex-shrink: 0;
 }
 
 .sidebar-panel {
-  position: absolute;
-  inset: 0 auto 0 0;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
   width: 84px;
+  height: 100vh;
   min-width: 84px;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(11, 11, 12, 0.98) 0%, rgba(9, 9, 10, 0.98) 100%),
     radial-gradient(circle at bottom, rgba(251, 75, 78, 0.08), transparent 28%);
@@ -101,6 +108,13 @@ body {
 .group\/sidebar:hover .sidebar-panel {
   width: 272px;
   box-shadow: 14px 0 34px rgba(0, 0, 0, 0.28);
+}
+
+@supports (height: 100dvh) {
+  .sidebar-rail,
+  .sidebar-panel {
+    height: 100dvh;
+  }
 }
 
 .sidebar-reveal {

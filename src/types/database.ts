@@ -64,6 +64,7 @@ export type Database = {
           name: string;
           note: string | null;
           organization_id: string | null;
+          responsible_user_id: string | null;
           role: string | null;
           status: Database["public"]["Enums"]["contact_status"];
           telegram: string | null;
@@ -80,6 +81,7 @@ export type Database = {
           name: string;
           note?: string | null;
           organization_id?: string | null;
+          responsible_user_id?: string | null;
           role?: string | null;
           status?: Database["public"]["Enums"]["contact_status"];
           telegram?: string | null;
@@ -96,6 +98,7 @@ export type Database = {
           name?: string;
           note?: string | null;
           organization_id?: string | null;
+          responsible_user_id?: string | null;
           role?: string | null;
           status?: Database["public"]["Enums"]["contact_status"];
           telegram?: string | null;
@@ -231,6 +234,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      workspace_invitations: {
+        Row: {
+          created_at: string;
+          email: string;
+          id: string;
+          invited_by: string | null;
+          role: Database["public"]["Enums"]["workspace_role"];
+          workspace_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          email: string;
+          id?: string;
+          invited_by?: string | null;
+          role?: Database["public"]["Enums"]["workspace_role"];
+          workspace_id: string;
+        };
+        Update: {
+          created_at?: string;
+          email?: string;
+          id?: string;
+          invited_by?: string | null;
+          role?: Database["public"]["Enums"]["workspace_role"];
+          workspace_id?: string;
+        };
+        Relationships: [];
+      };
       workspaces: {
         Row: {
           created_at: string;
@@ -260,6 +290,12 @@ export type Database = {
       };
     };
     Functions: {
+      accept_workspace_invitations_for_current_user: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          workspace_id: string;
+        }[];
+      };
       join_workspace_by_invite_code: {
         Args: { invite_code_input: string };
         Returns: {

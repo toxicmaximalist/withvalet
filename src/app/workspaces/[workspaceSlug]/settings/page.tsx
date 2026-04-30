@@ -1,5 +1,9 @@
 import { SettingsView } from "@/components/workspace/settings-view";
-import { getWorkspaceContext, getWorkspaceMembers } from "@/lib/data";
+import {
+  getWorkspaceContext,
+  getWorkspaceInvitations,
+  getWorkspaceMembers,
+} from "@/lib/data";
 import { getMessageValue } from "@/lib/navigation";
 
 type SettingsPageProps = {
@@ -13,16 +17,18 @@ export default async function SettingsPage({
 }: SettingsPageProps) {
   const { workspaceSlug } = await params;
   const { workspace } = await getWorkspaceContext(workspaceSlug);
-  const [members, query] = await Promise.all([
+  const [members, invitations, query] = await Promise.all([
     getWorkspaceMembers(workspace.id),
+    getWorkspaceInvitations(workspace.id),
     searchParams,
   ]);
 
   return (
     <SettingsView
+      canManageMembers={workspace.role === "owner"}
       error={getMessageValue(query.error)}
+      initialInvitations={invitations}
       initialMembers={members}
-      inviteCode={workspace.invite_code}
       success={getMessageValue(query.success)}
       workspaceName={workspace.name}
       workspaceSlug={workspace.slug}

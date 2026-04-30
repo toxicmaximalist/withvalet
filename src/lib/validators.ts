@@ -21,6 +21,10 @@ export const workspaceSchema = z.object({
   name: trimmedString.min(2, "Workspace name must be at least 2 characters."),
 });
 
+export const workspaceInviteSchema = z.object({
+  email: z.email(),
+});
+
 export const joinWorkspaceSchema = z.object({
   inviteCode: trimmedString
     .min(6, "Invite code is required.")
@@ -31,6 +35,7 @@ export const contactSchema = z.object({
   name: trimmedString.min(2, "Name must be at least 2 characters."),
   role: trimmedString.optional().or(z.literal("")),
   organizationName: trimmedString.optional().or(z.literal("")),
+  responsibleUserId: z.union([z.uuid(), z.literal(""), z.null()]).optional(),
   telegram: trimmedString.optional().or(z.literal("")),
   linkedin: trimmedString.optional().or(z.literal("")),
   whatsapp: trimmedString.optional().or(z.literal("")),

@@ -18,6 +18,13 @@ export function formatDate(
   return format(new Date(value), dateFormat);
 }
 
+export function sortByNewestDate<T extends { activity_date: string }>(items: T[]) {
+  return [...items].sort(
+    (left, right) =>
+      new Date(right.activity_date).getTime() - new Date(left.activity_date).getTime(),
+  );
+}
+
 export function slugify(value: string) {
   return value
     .trim()

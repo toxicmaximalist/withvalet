@@ -22,6 +22,12 @@ export const requireUser = cache(async () => {
     redirect("/login");
   }
 
+  const { error } = await supabase.rpc("accept_workspace_invitations_for_current_user");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
   return { supabase, user };
 });
 

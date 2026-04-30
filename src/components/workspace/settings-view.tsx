@@ -1,7 +1,9 @@
 "use client";
 
 import {
-  regenerateInviteCodeAction,
+  cancelWorkspaceInvitationAction,
+  inviteWorkspaceMemberAction,
+  removeWorkspaceMemberAction,
   updateWorkspaceSettingsAction,
 } from "@/actions/settings";
 import { DataTable } from "@/components/data-table";
@@ -11,22 +13,27 @@ import { NoticeBanner } from "@/components/notice-banner";
 import { PageHeader } from "@/components/page-header";
 import { SubmitButton } from "@/components/submit-button";
 import { formatDate } from "@/lib/utils";
-import type { WorkspaceMemberSummary } from "@/lib/data";
+import type {
+  WorkspaceInvitationSummary,
+  WorkspaceMemberSummary,
+} from "@/lib/data";
 import { useGetWorkspaceMembersQuery, workspaceQueryOptions } from "@/store/workspace-api";
 
 type SettingsViewProps = {
+  canManageMembers: boolean;
   error?: string;
+  initialInvitations: WorkspaceInvitationSummary[];
   initialMembers: WorkspaceMemberSummary[];
-  inviteCode: string;
   success?: string;
   workspaceName: string;
   workspaceSlug: string;
 };
 
 export function SettingsView({
+  canManageMembers,
   error,
+  initialInvitations,
   initialMembers,
-  inviteCode,
   success,
   workspaceName,
   workspaceSlug,
@@ -34,13 +41,14 @@ export function SettingsView({
   const queryArg = { workspaceSlug };
   const { data, isFetching } = useGetWorkspaceMembersQuery(queryArg, workspaceQueryOptions);
   const members = data ?? initialMembers;
+  const pendingInvitations = initialInvitations;
 
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow={workspaceName}
         title="Settings"
-        description="Manage workspace metadata, share invite access, and review current members."
+        description="Manage workspace metadata, invite teammates by email, and review current members."
       />
 
       <NoticeBanner error={error} success={success} />
@@ -64,22 +72,35 @@ export function SettingsView({
           </div>
 
           <div className="panel rounded-[28px] p-6">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-accent">Invite code</p>
-                <p className="mt-3 font-mono text-2xl text-foreground">{inviteCode}</p>
-              </div>
-              <form action={regenerateInviteCodeAction}>
+            <h2 className="text-lg font-semibold text-foreground">Invite teammate</h2>
+            <p className="mt-3 text-sm leading-6 text-muted">
+              Invite people with their email address. If they do not have an account yet, access
+              will activate automatically once they sign in with the same email.
+            </p>
+            {canManageMembers ? (
+              <form action={inviteWorkspaceMemberAction} className="mt-5 space-y-4">
                 <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
-                <button className="rounded-2xl border border-white/10 px-4 py-2.5 text-sm text-foreground hover:border-accent/30 hover:bg-white/[0.03]">
-                  Regenerate
-                </button>
+                <div>
+                  <FieldLabel htmlFor="invite-email">Email</FieldLabel>
+                  <TextInput
+                    id="invite-email"
+                    name="email"
+                    type="email"
+                    placeholder="teammate@company.com"
+                    required
+                  />
+                </div>
+                <SubmitButton>Send invite</SubmitButton>
               </form>
-            </div>
+            ) : (
+              <div className="mt-5 rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-6 text-muted">
+                Only workspace owners can send invitations or remove members.
+              </div>
+            )}
           </div>
         </div>
 
-        <div>
+        <div className="space-y-6">
           <div className="panel rounded-[24px] px-4 py-3 text-sm text-muted">
             {members.length} members currently have access to this workspace.
             {isFetching ? " Refreshing..." : ""}
@@ -122,8 +143,93 @@ export function SettingsView({
                     </span>
                   ),
                 },
+                {
+                  key: "actions",
+                  header: "Actions",
+                  className: "w-[120px]",
+                  render: (member) =>
+                    canManageMembers && member.role !== "owner" ? (
+                      <form action={removeWorkspaceMemberAction}>
+                        <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
+                        <input type="hidden" name="userId" value={member.userId} />
+                        <button className="text-sm text-danger hover:text-[#fca5a5]">
+                          Remove
+                        </button>
+                      </form>
+                    ) : (
+                      <span className="text-sm text-muted">
+                        {member.role === "owner" ? "Owner" : "—"}
+                      </span>
+                    ),
+                },
               ]}
             />
+          </div>
+
+          <div>
+            <div className="panel rounded-[24px] px-4 py-3 text-sm text-muted">
+              {pendingInvitations.length} pending invitation{pendingInvitations.length === 1 ? "" : "s"}.
+            </div>
+            <div className="mt-4">
+              <DataTable
+                data={pendingInvitations}
+                emptyState={
+                  <EmptyState
+                    title="No pending invitations"
+                    description="Email invites waiting for acceptance will appear here."
+                  />
+                }
+                columns={[
+                  {
+                    key: "email",
+                    header: "Email",
+                    render: (invitation) => (
+                      <div>
+                        <p className="font-medium text-foreground">{invitation.email}</p>
+                        <p className="mt-1 text-xs text-muted">
+                          {invitation.invitedByName || invitation.invitedByEmail
+                            ? `Invited by ${invitation.invitedByName || invitation.invitedByEmail}`
+                            : "Invited by workspace owner"}
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "role",
+                    header: "Role",
+                    render: (invitation) => (
+                      <span className="text-sm text-foreground">{invitation.role}</span>
+                    ),
+                  },
+                  {
+                    key: "sent",
+                    header: "Invited",
+                    render: (invitation) => (
+                      <span className="text-sm text-muted">
+                        {formatDate(invitation.createdAt)}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: "actions",
+                    header: "Actions",
+                    className: "w-[120px]",
+                    render: (invitation) =>
+                      canManageMembers ? (
+                        <form action={cancelWorkspaceInvitationAction}>
+                          <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
+                          <input type="hidden" name="invitationId" value={invitation.id} />
+                          <button className="text-sm text-danger hover:text-[#fca5a5]">
+                            Cancel
+                          </button>
+                        </form>
+                      ) : (
+                        <span className="text-sm text-muted">—</span>
+                      ),
+                  },
+                ]}
+              />
+            </div>
           </div>
         </div>
       </section>

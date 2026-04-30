@@ -41,6 +41,33 @@ function toNullableString(value: string | undefined) {
   return value && value.length ? value : null;
 }
 
+async function resolveResponsibleUserId(
+  supabase: Awaited<ReturnType<typeof getWorkspaceContext>>["supabase"],
+  workspaceId: string,
+  responsibleUserId: string | null | undefined,
+) {
+  if (!responsibleUserId) {
+    return null;
+  }
+
+  const { data: membership, error } = await supabase
+    .from("workspace_members")
+    .select("user_id")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", responsibleUserId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  if (!membership) {
+    throw new Error("Responsible person must be an active workspace member.");
+  }
+
+  return membership.user_id;
+}
+
 async function resolveOrganizationRecord(
   workspaceSlug: string,
   organizationName: string | undefined,
@@ -102,6 +129,11 @@ export async function updateContactRecord(
     workspaceSlug,
     parsed.data.organizationName,
   );
+  const responsibleUserId = await resolveResponsibleUserId(
+    supabase,
+    workspace.id,
+    parsed.data.responsibleUserId,
+  );
 
   const { error } = await supabase
     .from("contacts")
@@ -111,6 +143,7 @@ export async function updateContactRecord(
       name: parsed.data.name,
       note: toNullableString(parsed.data.note),
       organization_id: organization?.id ?? null,
+      responsible_user_id: responsibleUserId,
       role: toNullableString(parsed.data.role),
       status: parsed.data.status,
       telegram: toNullableString(parsed.data.telegram),

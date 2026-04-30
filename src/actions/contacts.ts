@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { getWorkspaceContext } from "@/lib/data";
 import { updateContactRecord } from "@/lib/workspace-mutations";
 import { buildPathWithMessage, redirectWithMessage } from "@/lib/navigation";
+import { importContactsFile } from "@/lib/workspace-imports";
 import { getErrorMessage } from "@/lib/utils";
 import { contactSchema } from "@/lib/validators";
 import type { Database } from "@/types/database";
@@ -57,6 +58,36 @@ async function resolveOrganizationId(
   return createdOrganizationRow.id;
 }
 
+async function resolveResponsibleUserId(
+  workspaceSlug: string,
+  workspaceId: string,
+  responsibleUserId: string | undefined,
+) {
+  const normalized = responsibleUserId?.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const { supabase } = await getWorkspaceContext(workspaceSlug);
+  const { data: membership, error } = await supabase
+    .from("workspace_members")
+    .select("user_id")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", normalized)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  if (!membership) {
+    throw new Error("Responsible person must be an active workspace member.");
+  }
+
+  return membership.user_id;
+}
+
 export async function createContactAction(formData: FormData) {
   const workspaceSlug = String(formData.get("workspaceSlug") ?? "");
   const { supabase, workspace } = await getWorkspaceContext(workspaceSlug);
@@ -65,6 +96,7 @@ export async function createContactAction(formData: FormData) {
     name: formData.get("name"),
     role: formData.get("role"),
     organizationName: formData.get("organizationName"),
+    responsibleUserId: formData.get("responsibleUserId"),
     telegram: formData.get("telegram"),
     linkedin: formData.get("linkedin"),
     whatsapp: formData.get("whatsapp"),
@@ -81,30 +113,50 @@ export async function createContactAction(formData: FormData) {
     );
   }
 
-  const organizationId = await resolveOrganizationId(
-    workspaceSlug,
-    parsed.data.organizationName,
-  );
+  let data:
+    | Database["public"]["Tables"]["contacts"]["Row"]
+    | undefined;
 
-  const { data, error } = await supabase
-    .from("contacts")
-    .insert({
-      gmail: parsed.data.gmail || null,
-      linkedin: parsed.data.linkedin || null,
-      name: parsed.data.name,
-      note: parsed.data.note || null,
-      organization_id: organizationId,
-      role: parsed.data.role || null,
-      status: parsed.data.status,
-      telegram: parsed.data.telegram || null,
-      whatsapp: parsed.data.whatsapp || null,
-      workspace_id: workspace.id,
-    })
-    .select("*")
-    .single();
+  try {
+    const organizationId = await resolveOrganizationId(
+      workspaceSlug,
+      parsed.data.organizationName,
+    );
+    const responsibleUserId = await resolveResponsibleUserId(
+      workspaceSlug,
+      workspace.id,
+      parsed.data.responsibleUserId ?? undefined,
+    );
 
-  if (error) {
+    const result = await supabase
+      .from("contacts")
+      .insert({
+        gmail: parsed.data.gmail || null,
+        linkedin: parsed.data.linkedin || null,
+        name: parsed.data.name,
+        note: parsed.data.note || null,
+        organization_id: organizationId,
+        responsible_user_id: responsibleUserId,
+        role: parsed.data.role || null,
+        status: parsed.data.status,
+        telegram: parsed.data.telegram || null,
+        whatsapp: parsed.data.whatsapp || null,
+        workspace_id: workspace.id,
+      })
+      .select("*")
+      .single();
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    data = result.data;
+  } catch (error) {
     redirectWithMessage(`/workspaces/${workspaceSlug}/contacts`, "error", getErrorMessage(error));
+  }
+
+  if (!data) {
+    redirectWithMessage(`/workspaces/${workspaceSlug}/contacts`, "error", "Contact could not be created.");
   }
 
   redirect(
@@ -126,6 +178,7 @@ export async function updateContactAction(formData: FormData) {
       name: String(formData.get("name") ?? ""),
       note: String(formData.get("note") ?? ""),
       organizationName: String(formData.get("organizationName") ?? ""),
+      responsibleUserId: String(formData.get("responsibleUserId") ?? ""),
       role: String(formData.get("role") ?? ""),
       status: String(formData.get("status") ?? "") as Database["public"]["Enums"]["contact_status"],
       telegram: String(formData.get("telegram") ?? ""),
@@ -172,5 +225,65 @@ export async function deleteContactAction(formData: FormData) {
     `/workspaces/${workspaceSlug}/contacts`,
     "success",
     "Contact deleted.",
+  );
+}
+
+export async function deleteAllContactsAction(formData: FormData) {
+  const workspaceSlug = String(formData.get("workspaceSlug") ?? "");
+  const { supabase, workspace } = await getWorkspaceContext(workspaceSlug);
+
+  const { error } = await supabase
+    .from("contacts")
+    .delete()
+    .eq("workspace_id", workspace.id);
+
+  if (error) {
+    redirectWithMessage(
+      `/workspaces/${workspaceSlug}/contacts`,
+      "error",
+      getErrorMessage(error),
+    );
+  }
+
+  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
+  revalidatePath(`/workspaces/${workspaceSlug}/outreach`);
+  revalidatePath(`/workspaces/${workspaceSlug}/organizations`);
+  revalidatePath(`/workspaces/${workspaceSlug}/folders`);
+  redirectWithMessage(
+    `/workspaces/${workspaceSlug}/contacts`,
+    "success",
+    "All contacts deleted.",
+  );
+}
+
+export async function importContactsAction(formData: FormData) {
+  const workspaceSlug = String(formData.get("workspaceSlug") ?? "");
+  const file = formData.get("file");
+
+  if (!(file instanceof File) || !file.size) {
+    redirectWithMessage(
+      `/workspaces/${workspaceSlug}/contacts`,
+      "error",
+      "Choose a CSV or Excel file to import.",
+    );
+  }
+
+  let result: Awaited<ReturnType<typeof importContactsFile>>;
+
+  try {
+    result = await importContactsFile(workspaceSlug, file);
+  } catch (error) {
+    redirectWithMessage(
+      `/workspaces/${workspaceSlug}/contacts`,
+      "error",
+      getErrorMessage(error),
+    );
+  }
+
+  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
+  redirectWithMessage(
+    `/workspaces/${workspaceSlug}/contacts`,
+    "success",
+    `Imported ${result.totalParsed} contact rows. ${result.created} created, ${result.updated} updated, ${result.skipped} skipped.`,
   );
 }
