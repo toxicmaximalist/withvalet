@@ -3,6 +3,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  getErrorMessage,
+  getSupabaseMigrationGuidance,
+  isWorkspaceInvitationFeatureUnavailableError,
+} from "@/lib/utils";
 
 export const LAST_WORKSPACE_COOKIE = "withvalet:last-workspace";
 
@@ -15,17 +20,30 @@ export const getSessionContext = cache(async () => {
   return { supabase, user };
 });
 
+export async function acceptPendingWorkspaceInvitations(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+) {
+  const { error } = await supabase.rpc("accept_workspace_invitations_for_current_user");
+
+  if (!error) {
+    return;
+  }
+
+  const message = getErrorMessage(error);
+
+  if (isWorkspaceInvitationFeatureUnavailableError(message)) {
+    console.warn(getSupabaseMigrationGuidance(message));
+    return;
+  }
+
+  throw new Error(message);
+}
+
 export const requireUser = cache(async () => {
   const { supabase, user } = await getSessionContext();
 
   if (!user) {
     redirect("/login");
-  }
-
-  const { error } = await supabase.rpc("accept_workspace_invitations_for_current_user");
-
-  if (error) {
-    throw new Error(error.message);
   }
 
   return { supabase, user };

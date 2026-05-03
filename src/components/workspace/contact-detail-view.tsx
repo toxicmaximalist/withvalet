@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import {
   BriefcaseBusiness,
@@ -10,15 +11,16 @@ import {
   Link2,
   Mail,
   MessageCircleMore,
+  Pencil,
   Send,
   Signal,
   StickyNote,
+  Trash2,
   UserRound,
   X,
   type LucideIcon,
 } from "lucide-react";
 
-import { deleteContactAction } from "@/actions/contacts";
 import { ActivityFeedTable } from "@/components/activity-feed-table";
 import { FieldLabel, SelectInput, TextArea, TextInput } from "@/components/form-controls";
 import { Modal } from "@/components/modal";
@@ -28,6 +30,9 @@ import { StatusBadge } from "@/components/status-badge";
 import { SubmitButton } from "@/components/submit-button";
 import { useNoticeState } from "@/components/workspace/use-notice-state";
 import { getActivityContentText } from "@/lib/activity-content";
+import {
+  buildPathWithMessage,
+} from "@/lib/navigation";
 import {
   ACTIVITY_STATUSES,
   ACTIVITY_STATUS_LABELS,
@@ -47,8 +52,11 @@ import type { ActivityListItem, ContactDetail } from "@/lib/data";
 import {
   activityQueryOptions,
   useCreateActivityMutation,
+  useDeleteContactMutation,
+  useDeleteActivityMutation,
   useGetContactDetailQuery,
   useGetWorkspaceMembersQuery,
+  useUpdateActivityMutation,
   useUpdateContactMutation,
   workspaceQueryOptions,
 } from "@/store/workspace-api";
@@ -66,6 +74,7 @@ export function ContactDetailView({
   success,
   workspaceSlug,
 }: ContactDetailViewProps) {
+  const router = useRouter();
   const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<ActivityListItem | null>(null);
   const { error: noticeError, showError, showSuccess, success: noticeSuccess } =
@@ -76,6 +85,7 @@ export function ContactDetailView({
   const membersQuery = useGetWorkspaceMembersQuery({ workspaceSlug }, workspaceQueryOptions);
   const [updateContact, updateContactState] = useUpdateContactMutation();
   const [createActivity, createActivityState] = useCreateActivityMutation();
+  const [deleteContact, deleteContactState] = useDeleteContactMutation();
   const contact = data;
   const sortedActivities = contact ? sortByNewestDate(contact.activities) : [];
   const members = membersQuery.data ?? [];
@@ -112,7 +122,7 @@ export function ContactDetailView({
     const formData = new FormData(event.currentTarget);
 
     try {
-      await createActivity({
+      const request = createActivity({
         optimistic: {
           contactLastContactDate: contact?.last_contact_date,
           contactName: contact?.name,
@@ -139,9 +149,24 @@ export function ContactDetailView({
       }
 
       setIsActivityModalOpen(false);
+      await request;
       showSuccess("Activity logged.");
     } catch (error) {
       showError(getErrorMessage(error));
+    }
+  }
+
+  async function handleDeleteContact() {
+    const targetPath = `/workspaces/${workspaceSlug}/contacts`;
+    router.push(buildPathWithMessage(targetPath, "success", "Contact deleted."));
+
+    try {
+      await deleteContact({
+        contactId,
+        workspaceSlug,
+      }).unwrap();
+    } catch (deleteError) {
+      router.replace(buildPathWithMessage(targetPath, "error", getErrorMessage(deleteError)));
     }
   }
 
@@ -205,7 +230,7 @@ export function ContactDetailView({
               </div>
               <div>
                 <FieldLabel htmlFor="status">Status</FieldLabel>
-                <SelectInput id="status" name="status" defaultValue="completed">
+                <SelectInput id="status" name="status" defaultValue="sent">
                   {ACTIVITY_STATUSES.map((status) => (
                     <option key={status} value={status}>
                       {ACTIVITY_STATUS_LABELS[status]}
@@ -259,13 +284,14 @@ export function ContactDetailView({
                 </div>
               </div>
 
-              <form action={deleteContactAction}>
-                <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
-                <input type="hidden" name="contactId" value={contact.id} />
-                <button className="rounded-xl border border-danger/30 px-3 py-2 text-sm text-danger hover:bg-danger/10">
-                  Delete
-                </button>
-              </form>
+              <button
+                type="button"
+                onClick={handleDeleteContact}
+                disabled={deleteContactState.isLoading}
+                className="rounded-xl border border-danger/30 px-3 py-2 text-sm text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleteContactState.isLoading ? "Deleting..." : "Delete"}
+              </button>
             </div>
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -495,7 +521,7 @@ export function ContactDetailView({
                   No outreach activity yet
                 </p>
                 <p className="mt-2 text-sm leading-6 text-muted">
-                  Start the timeline by logging an email, call, note, or meeting.
+                  Start the timeline by logging an email, LinkedIn message, follow-up, call, demo, or Telegram message.
                 </p>
               </div>
             )}
@@ -504,9 +530,13 @@ export function ContactDetailView({
       </div>
 
       <ActivityDetailsDrawer
+        key={selectedActivity?.id ?? "activity-drawer"}
         activity={selectedActivity}
         contact={contact}
+        onActivityChange={setSelectedActivity}
         onClose={() => setSelectedActivity(null)}
+        onError={showError}
+        onSuccess={showSuccess}
         workspaceSlug={workspaceSlug}
       />
     </>
@@ -558,132 +588,342 @@ function ContextCard({
 function ActivityDetailsDrawer({
   activity,
   contact,
+  onActivityChange,
   onClose,
+  onError,
+  onSuccess,
   workspaceSlug,
 }: {
   activity: ActivityListItem | null;
   contact: ContactDetail;
+  onActivityChange: (activity: ActivityListItem | null) => void;
   onClose: () => void;
+  onError: (message: string) => void;
+  onSuccess: (message: string) => void;
   workspaceSlug: string;
 }) {
-  return (
-    <div
-      className={cn(
-        "fixed inset-0 z-50 transition",
-        activity ? "pointer-events-auto" : "pointer-events-none",
-      )}
-    >
-      <button
-        type="button"
-        aria-label="Close activity details"
-        onClick={onClose}
-        className={cn(
-          "absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity",
-          activity ? "opacity-100" : "opacity-0",
-        )}
-      />
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [deleteActivity, deleteActivityState] = useDeleteActivityMutation();
+  const [updateActivity, updateActivityState] = useUpdateActivityMutation();
+  const isOptimisticActivity = activity ? isOptimisticActivityId(activity.id) : false;
 
-      <aside
+  async function handleActivityUpdate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!activity) {
+      return;
+    }
+
+    if (isOptimisticActivity) {
+      onError("This outreach item is still saving. Try again in a moment.");
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+
+    try {
+      const result = await updateActivity({
+        activityId: activity.id,
+        contactId: activity.contact_id,
+        organizationId: activity.organization_id,
+        payload: {
+          activityDate: String(formData.get("activityDate") ?? ""),
+          content: String(formData.get("content") ?? ""),
+          status: String(formData.get("status") ?? "") as ActivityListItem["status"],
+          type: String(formData.get("type") ?? "") as ActivityListItem["type"],
+        },
+        workspaceSlug,
+      }).unwrap();
+
+      onActivityChange(result.activity);
+      onSuccess("Activity updated.");
+      setIsEditing(false);
+    } catch (error) {
+      onError(getErrorMessage(error));
+    }
+  }
+
+  async function handleActivityDelete() {
+    if (!activity) {
+      return;
+    }
+
+    if (isOptimisticActivity) {
+      onError("This outreach item is still saving. Try again in a moment.");
+      return;
+    }
+
+    const deletedActivity = activity;
+    setIsDeleteModalOpen(false);
+    onActivityChange(null);
+
+    try {
+      await deleteActivity({
+        activityId: activity.id,
+        contactId: activity.contact_id,
+        organizationId: activity.organization_id,
+        workspaceSlug,
+      }).unwrap();
+
+      onSuccess("Activity deleted.");
+    } catch (error) {
+      onActivityChange(deletedActivity);
+      onError(getErrorMessage(error));
+    }
+  }
+
+  return (
+    <>
+      <div
         className={cn(
-          "absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l border-white/10 bg-[#09090b]/96 shadow-[-24px_0_80px_rgba(0,0,0,0.5)] transition-transform duration-300",
-          activity ? "translate-x-0" : "translate-x-full",
+          "fixed inset-0 z-50 transition",
+          activity ? "pointer-events-auto" : "pointer-events-none",
         )}
       >
-        <div className="flex items-center justify-between border-b border-white/8 px-6 py-5">
-          <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-              Outreach details
-            </p>
-            <h3 className="mt-2 text-2xl font-semibold text-foreground">
-              {activity ? ACTIVITY_TYPE_LABELS[activity.type] : "Activity"}
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex size-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-muted hover:border-white/16 hover:bg-white/[0.05] hover:text-foreground"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
+        <button
+          type="button"
+          aria-label="Close activity details"
+          onClick={onClose}
+          className={cn(
+            "absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity",
+            activity ? "opacity-100" : "opacity-0",
+          )}
+        />
 
-        {activity ? (
-          <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                  {ACTIVITY_TYPE_LABELS[activity.type]}
-                </span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-foreground">
-                  {ACTIVITY_STATUS_LABELS[activity.status]}
-                </span>
-              </div>
-              <p className="mt-4 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                Message or note
-              </p>
-              <p className="mt-3 whitespace-pre-wrap break-words text-base leading-8 text-foreground">
-                {getActivityContentText(activity.content)}
-              </p>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <DrawerMeta
-                icon={CalendarDays}
-                label="Activity date"
-                value={formatDate(activity.activity_date, "No date", "MMMM d, yyyy · HH:mm")}
-              />
-              <DrawerMeta
-                icon={UserRound}
-                label="Contact"
-                value={contact.name}
-              />
-              <DrawerMeta
-                icon={Building2}
-                label="Organization"
-                value={
-                  activity.organizationName ? (
-                    contact.organization_id ? (
-                      <Link
-                        href={`/workspaces/${workspaceSlug}/organizations/${contact.organization_id}`}
-                        className="text-foreground hover:text-accent"
-                      >
-                        {activity.organizationName}
-                      </Link>
-                    ) : (
-                      activity.organizationName
-                    )
-                  ) : (
-                    "None linked"
-                  )
-                }
-              />
-              <DrawerMeta
-                icon={FolderKanban}
-                label="Folder coverage"
-                value={
-                  contact.folders.length
-                    ? contact.folders.map((folder) => folder.name).join(", ")
-                    : "No folders assigned"
-                }
-              />
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+        <aside
+          className={cn(
+            "absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l border-white/10 bg-[#09090b]/96 shadow-[-24px_0_80px_rgba(0,0,0,0.5)] transition-transform duration-300",
+            activity ? "translate-x-0" : "translate-x-full",
+          )}
+        >
+          <div className="flex items-center justify-between border-b border-white/8 px-6 py-5">
+            <div>
               <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                Contact channels
+                Outreach details
               </p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <ChannelRow icon={Mail} label="Gmail" value={contact.gmail} />
-                <ChannelRow icon={Link2} label="LinkedIn" value={contact.linkedin} />
-                <ChannelRow icon={Send} label="Telegram" value={contact.telegram} />
-                <ChannelRow icon={MessageCircleMore} label="WhatsApp" value={contact.whatsapp} />
-              </div>
+              <h3 className="mt-2 text-2xl font-semibold text-foreground">
+                {activity ? ACTIVITY_TYPE_LABELS[activity.type] : "Activity"}
+              </h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label={isEditing ? "Cancel editing outreach" : "Edit outreach"}
+                disabled={isOptimisticActivity}
+                onClick={() => setIsEditing((current) => !current)}
+                className="inline-flex size-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-muted hover:border-white/16 hover:bg-white/[0.05] hover:text-foreground disabled:cursor-wait disabled:opacity-50 disabled:hover:border-white/10 disabled:hover:bg-white/[0.03] disabled:hover:text-muted"
+              >
+                <Pencil className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Delete outreach"
+                disabled={isOptimisticActivity}
+                onClick={() => setIsDeleteModalOpen(true)}
+                className="inline-flex size-10 items-center justify-center rounded-2xl border border-danger/30 bg-danger/10 text-danger hover:bg-danger/15 disabled:cursor-wait disabled:opacity-50 disabled:hover:bg-danger/10"
+              >
+                <Trash2 className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex size-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-muted hover:border-white/16 hover:bg-white/[0.05] hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
             </div>
           </div>
-        ) : null}
-      </aside>
-    </div>
+
+          {activity ? (
+            <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+              {isOptimisticActivity ? (
+                <div className="rounded-[24px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm text-muted">
+                  This outreach item is still being saved. Editing and deletion will be available once the server confirms it.
+                </div>
+              ) : null}
+              {isEditing ? (
+                <form onSubmit={handleActivityUpdate} className="space-y-4 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <FieldLabel htmlFor="drawerType">Type</FieldLabel>
+                      <SelectInput
+                        id="drawerType"
+                        name="type"
+                        defaultValue={activity.type}
+                      >
+                        {ACTIVITY_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {ACTIVITY_TYPE_LABELS[type]}
+                          </option>
+                        ))}
+                      </SelectInput>
+                    </div>
+                    <div>
+                      <FieldLabel htmlFor="drawerStatus">Status</FieldLabel>
+                      <SelectInput
+                        id="drawerStatus"
+                        name="status"
+                        defaultValue={activity.status}
+                      >
+                        {ACTIVITY_STATUSES.map((status) => (
+                          <option key={status} value={status}>
+                            {ACTIVITY_STATUS_LABELS[status]}
+                          </option>
+                        ))}
+                      </SelectInput>
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel htmlFor="drawerActivityDate">Activity date</FieldLabel>
+                    <TextInput
+                      id="drawerActivityDate"
+                      name="activityDate"
+                      type="datetime-local"
+                      defaultValue={toDateTimeLocalValue(activity.activity_date)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel htmlFor="drawerContent">Note or message summary</FieldLabel>
+                    <TextArea
+                      id="drawerContent"
+                      name="content"
+                      defaultValue={activity.content}
+                      placeholder="Summarize what happened or what you sent..."
+                      required
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      className="inline-flex items-center rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-foreground hover:border-white/16 hover:bg-white/[0.04]"
+                    >
+                      Cancel
+                    </button>
+                    <SubmitButton loading={updateActivityState.isLoading}>
+                      Save outreach
+                    </SubmitButton>
+                  </div>
+                </form>
+              ) : (
+                <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {ACTIVITY_TYPE_LABELS[activity.type]}
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-foreground">
+                      {ACTIVITY_STATUS_LABELS[activity.status]}
+                    </span>
+                  </div>
+                  <p className="mt-4 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                    Message or note
+                  </p>
+                  <p className="mt-3 whitespace-pre-wrap break-words text-base leading-8 text-foreground">
+                    {getActivityContentText(activity.content)}
+                  </p>
+                </div>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <DrawerMeta
+                  icon={CalendarDays}
+                  label="Activity date"
+                  value={formatDate(activity.activity_date, "No date", "MMMM d, yyyy · HH:mm")}
+                />
+                <DrawerMeta
+                  icon={UserRound}
+                  label="Contact"
+                  value={contact.name}
+                />
+                <DrawerMeta
+                  icon={Building2}
+                  label="Organization"
+                  value={
+                    activity.organizationName ? (
+                      activity.organization_id ? (
+                        <Link
+                          href={`/workspaces/${workspaceSlug}/organizations/${activity.organization_id}`}
+                          className="text-foreground hover:text-accent"
+                        >
+                          {activity.organizationName}
+                        </Link>
+                      ) : (
+                        activity.organizationName
+                      )
+                    ) : (
+                      "None linked"
+                    )
+                  }
+                />
+                <DrawerMeta
+                  icon={FolderKanban}
+                  label="Folder coverage"
+                  value={
+                    contact.folders.length
+                      ? contact.folders.map((folder) => folder.name).join(", ")
+                      : "No folders assigned"
+                  }
+                />
+              </div>
+
+              <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                  Contact channels
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <ChannelRow icon={Mail} label="Gmail" value={contact.gmail} />
+                  <ChannelRow icon={Link2} label="LinkedIn" value={contact.linkedin} />
+                  <ChannelRow icon={Send} label="Telegram" value={contact.telegram} />
+                  <ChannelRow icon={MessageCircleMore} label="WhatsApp" value={contact.whatsapp} />
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </aside>
+      </div>
+
+      <Modal
+        open={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        title="Delete outreach activity"
+        description="This removes the selected touchpoint from the contact timeline."
+      >
+        <div className="space-y-5">
+          <div className="rounded-[24px] border border-danger/20 bg-danger/10 px-4 py-4 text-sm leading-6 text-danger">
+            This action cannot be undone.
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setIsDeleteModalOpen(false)}
+              className="inline-flex items-center rounded-xl border border-white/10 bg-white/[0.02] px-4 py-2 text-sm text-foreground hover:border-white/16 hover:bg-white/[0.04]"
+            >
+              Cancel
+            </button>
+            <SubmitButton
+              type="button"
+              onClick={handleActivityDelete}
+              loading={deleteActivityState.isLoading}
+              pendingLabel="Deleting..."
+              className="border-danger/40 bg-danger text-white shadow-none hover:scale-100 hover:bg-[#ef4444] hover:shadow-none"
+            >
+              Delete outreach
+            </SubmitButton>
+          </div>
+        </div>
+      </Modal>
+    </>
   );
+}
+
+function toDateTimeLocalValue(value: string) {
+  return new Date(value).toISOString().slice(0, 16);
+}
+
+function isOptimisticActivityId(id: string) {
+  return id.startsWith("temp-activity-");
 }
 
 function DrawerMeta({

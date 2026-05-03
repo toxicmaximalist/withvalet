@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
 import { getWorkspaceContext } from "@/lib/data";
 import { redirectWithMessage } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
@@ -20,7 +18,6 @@ export async function createFolderAction(formData: FormData) {
     redirectWithMessage(`/workspaces/${workspaceSlug}/folders`, "error", getErrorMessage(error));
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/folders`);
   redirectWithMessage(`/workspaces/${workspaceSlug}/folders`, "success", "Folder created.");
 }
 
@@ -42,8 +39,6 @@ export async function syncFolderContactsAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/folders`);
-  revalidatePath(`/workspaces/${workspaceSlug}/folders/${folderId}`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/folders/${folderId}`,
     "success",
@@ -70,6 +65,5 @@ export async function deleteFolderAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/folders`);
   redirectWithMessage(`/workspaces/${workspaceSlug}/folders`, "success", "Folder deleted.");
 }

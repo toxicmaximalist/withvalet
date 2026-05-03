@@ -1,13 +1,16 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { getWorkspaceContext } from "@/lib/data";
 import { updateContactRecord } from "@/lib/workspace-mutations";
 import { buildPathWithMessage, redirectWithMessage } from "@/lib/navigation";
 import { importContactsFile } from "@/lib/workspace-imports";
-import { getErrorMessage } from "@/lib/utils";
+import {
+  getErrorMessage,
+  getSupabaseMigrationGuidance,
+  isContactOwnerFeatureUnavailableError,
+} from "@/lib/utils";
 import { contactSchema } from "@/lib/validators";
 import type { Database } from "@/types/database";
 
@@ -128,23 +131,53 @@ export async function createContactAction(formData: FormData) {
       parsed.data.responsibleUserId ?? undefined,
     );
 
-    const result = await supabase
+    const insertPayload = {
+      gmail: parsed.data.gmail || null,
+      linkedin: parsed.data.linkedin || null,
+      name: parsed.data.name,
+      note: parsed.data.note || null,
+      organization_id: organizationId,
+      responsible_user_id: responsibleUserId,
+      role: parsed.data.role || null,
+      status: parsed.data.status,
+      telegram: parsed.data.telegram || null,
+      whatsapp: parsed.data.whatsapp || null,
+      workspace_id: workspace.id,
+    };
+
+    let result = await supabase
       .from("contacts")
-      .insert({
-        gmail: parsed.data.gmail || null,
-        linkedin: parsed.data.linkedin || null,
-        name: parsed.data.name,
-        note: parsed.data.note || null,
-        organization_id: organizationId,
-        responsible_user_id: responsibleUserId,
-        role: parsed.data.role || null,
-        status: parsed.data.status,
-        telegram: parsed.data.telegram || null,
-        whatsapp: parsed.data.whatsapp || null,
-        workspace_id: workspace.id,
-      })
+      .insert(insertPayload)
       .select("*")
       .single();
+
+    if (result.error) {
+      const message = getErrorMessage(result.error);
+
+      if (isContactOwnerFeatureUnavailableError(message)) {
+        if (responsibleUserId) {
+          throw new Error(getSupabaseMigrationGuidance(message));
+        }
+
+        const fallbackInsertPayload = {
+          gmail: insertPayload.gmail,
+          linkedin: insertPayload.linkedin,
+          name: insertPayload.name,
+          note: insertPayload.note,
+          organization_id: insertPayload.organization_id,
+          role: insertPayload.role,
+          status: insertPayload.status,
+          telegram: insertPayload.telegram,
+          whatsapp: insertPayload.whatsapp,
+          workspace_id: insertPayload.workspace_id,
+        };
+        result = await supabase
+          .from("contacts")
+          .insert(fallbackInsertPayload)
+          .select("*")
+          .single();
+      }
+    }
 
     if (result.error) {
       throw result.error;
@@ -192,8 +225,6 @@ export async function updateContactAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
-  revalidatePath(`/workspaces/${workspaceSlug}/contacts/${contactId}`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/contacts/${contactId}`,
     "success",
@@ -220,7 +251,6 @@ export async function deleteContactAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/contacts`,
     "success",
@@ -245,10 +275,6 @@ export async function deleteAllContactsAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
-  revalidatePath(`/workspaces/${workspaceSlug}/outreach`);
-  revalidatePath(`/workspaces/${workspaceSlug}/organizations`);
-  revalidatePath(`/workspaces/${workspaceSlug}/folders`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/contacts`,
     "success",
@@ -280,7 +306,6 @@ export async function importContactsAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/contacts`,
     "success",

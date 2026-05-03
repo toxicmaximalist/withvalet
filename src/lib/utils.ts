@@ -96,3 +96,87 @@ export function isSupabaseSchemaError(message: string) {
     normalized.includes("column")
   );
 }
+
+export function isMissingSupabaseFunctionError(message: string, functionName: string) {
+  const normalized = message.toLowerCase();
+  const normalizedFunctionName = functionName.toLowerCase();
+
+  return (
+    normalized.includes(normalizedFunctionName) &&
+    (normalized.includes("schema cache") || normalized.includes("function"))
+  );
+}
+
+export function isMissingSupabaseTableError(message: string, tableName: string) {
+  const normalized = message.toLowerCase();
+  const normalizedTableName = tableName.toLowerCase();
+
+  return (
+    normalized.includes(normalizedTableName) &&
+    (normalized.includes("schema cache") ||
+      normalized.includes("relation") ||
+      normalized.includes("table"))
+  );
+}
+
+export function isMissingSupabaseColumnError(
+  message: string,
+  tableName: string,
+  columnName: string,
+) {
+  const normalized = message.toLowerCase();
+  const normalizedTableName = tableName.toLowerCase();
+  const normalizedColumnName = columnName.toLowerCase();
+
+  return (
+    normalized.includes(normalizedTableName) &&
+    normalized.includes(normalizedColumnName) &&
+    (normalized.includes("schema cache") || normalized.includes("column"))
+  );
+}
+
+export function isWorkspaceInvitationFeatureUnavailableError(message: string) {
+  const normalized = message.toLowerCase();
+
+  return (
+    isMissingSupabaseFunctionError(
+      message,
+      "accept_workspace_invitations_for_current_user",
+    ) ||
+    isMissingSupabaseTableError(message, "workspace_invitations") ||
+    (normalized.includes("workspace_id") && normalized.includes("ambiguous"))
+  );
+}
+
+export function isContactOwnerFeatureUnavailableError(message: string) {
+  return isMissingSupabaseColumnError(
+    message,
+    "contacts",
+    "responsible_user_id",
+  );
+}
+
+export function isProfilesPolicyError(message: string) {
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("profiles") &&
+    normalized.includes("row-level security policy")
+  );
+}
+
+export function getSupabaseMigrationGuidance(message: string) {
+  if (isWorkspaceInvitationFeatureUnavailableError(message)) {
+    return "Apply `supabase/migrations/0002_workspace_email_invites_and_contact_owners.sql`, or run `pnpm db:push` to enable email invitations and automatic invite acceptance.";
+  }
+
+  if (isContactOwnerFeatureUnavailableError(message)) {
+    return "Apply `supabase/migrations/0002_workspace_email_invites_and_contact_owners.sql`, or run `pnpm db:push` to apply every checked-in migration.";
+  }
+
+  if (isProfilesPolicyError(message)) {
+    return "Apply `supabase/migrations/0003_profiles_member_visibility.sql`, or run `pnpm db:push` to allow self-managed profiles and workspace member name visibility.";
+  }
+
+  return "Apply the SQL files in `supabase/migrations` to your Supabase project in order, or run `pnpm db:push`, then refresh this page.";
+}

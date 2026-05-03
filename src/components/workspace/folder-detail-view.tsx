@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { deleteFolderAction } from "@/actions/folders";
 import { DataTable } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { NoticeBanner } from "@/components/notice-banner";
@@ -11,9 +11,11 @@ import { OrganizationBadge } from "@/components/organization-badge";
 import { PageHeader } from "@/components/page-header";
 import { SubmitButton } from "@/components/submit-button";
 import { useNoticeState } from "@/components/workspace/use-notice-state";
+import { buildPathWithMessage } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
 import { formatDate } from "@/lib/utils";
 import {
+  useDeleteFolderMutation,
   useGetFolderDetailQuery,
   useSyncFolderContactsMutation,
   workspaceQueryOptions,
@@ -32,11 +34,13 @@ export function FolderDetailView({
   success,
   workspaceSlug,
 }: FolderDetailViewProps) {
+  const router = useRouter();
   const { error: noticeError, showError, showSuccess, success: noticeSuccess } =
     useNoticeState(error, success);
   const queryArg = { workspaceSlug, folderId };
   const { data, isFetching, isLoading } = useGetFolderDetailQuery(queryArg, workspaceQueryOptions);
   const [syncFolderContacts, syncFolderContactsState] = useSyncFolderContactsMutation();
+  const [deleteFolder, deleteFolderState] = useDeleteFolderMutation();
   const folder = data;
   const [draftSelectedContactIds, setDraftSelectedContactIds] = useState<string[] | null>(null);
   const selectedContactIds =
@@ -78,6 +82,20 @@ export function FolderDetailView({
     }
   }
 
+  async function handleDeleteFolder() {
+    const targetPath = `/workspaces/${workspaceSlug}/folders`;
+    router.push(buildPathWithMessage(targetPath, "success", "Folder deleted."));
+
+    try {
+      await deleteFolder({
+        folderId,
+        workspaceSlug,
+      }).unwrap();
+    } catch (deleteError) {
+      router.replace(buildPathWithMessage(targetPath, "error", getErrorMessage(deleteError)));
+    }
+  }
+
   if (isLoading && !folder) {
     return (
       <div className="panel rounded-[28px] px-6 py-10 text-sm text-muted">
@@ -101,13 +119,14 @@ export function FolderDetailView({
         title={folder.name}
         description={`Created ${formatDate(folder.created_at)}. Add or remove contacts to shape the group${isFetching ? " · Refreshing..." : "."}`}
         actions={
-          <form action={deleteFolderAction}>
-            <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
-            <input type="hidden" name="folderId" value={folder.id} />
-            <button className="rounded-xl border border-danger/30 px-3 py-2 text-sm text-danger hover:bg-danger/10">
-              Delete folder
-            </button>
-          </form>
+          <button
+            type="button"
+            onClick={handleDeleteFolder}
+            disabled={deleteFolderState.isLoading}
+            className="rounded-xl border border-danger/30 px-3 py-2 text-sm text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deleteFolderState.isLoading ? "Deleting..." : "Delete folder"}
+          </button>
         }
       />
 

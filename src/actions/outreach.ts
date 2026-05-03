@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
 import { getWorkspaceContext } from "@/lib/data";
 import { redirectWithMessage } from "@/lib/navigation";
 import { importOutreachActivitiesFile } from "@/lib/workspace-imports";
@@ -26,8 +24,6 @@ export async function createActivityAction(formData: FormData) {
     redirectWithMessage(returnTo, "error", getErrorMessage(error));
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/outreach`);
-  revalidatePath(returnTo);
   redirectWithMessage(returnTo, "success", "Activity logged.");
 }
 
@@ -49,8 +45,6 @@ export async function importActivitiesAction(formData: FormData) {
     redirectWithMessage(returnTo, "error", getErrorMessage(error));
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
-  revalidatePath(`/workspaces/${workspaceSlug}/outreach`);
   redirectWithMessage(
     returnTo,
     "success",
@@ -73,8 +67,5 @@ export async function deleteAllActivitiesAction(formData: FormData) {
     redirectWithMessage(returnTo, "error", getErrorMessage(error));
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/outreach`);
-  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
-  revalidatePath(`/workspaces/${workspaceSlug}/organizations`);
   redirectWithMessage(returnTo, "success", "All outreach activities deleted.");
 }

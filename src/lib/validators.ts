@@ -21,6 +21,10 @@ export const workspaceSchema = z.object({
   name: trimmedString.min(2, "Workspace name must be at least 2 characters."),
 });
 
+export const profileSchema = z.object({
+  fullName: trimmedString.min(2, "Name must be at least 2 characters."),
+});
+
 export const workspaceInviteSchema = z.object({
   email: z.email(),
 });
@@ -55,6 +59,11 @@ export const activitySchema = z.object({
   status: z.enum(ACTIVITY_STATUSES),
   content: trimmedString.min(1, "Activity content is required."),
   activityDate: trimmedString.min(1, "Activity date is required."),
+});
+
+export const activityUpdateSchema = activitySchema.omit({
+  contactId: true,
+  organizationId: true,
 });
 
 export const organizationSchema = z.object({

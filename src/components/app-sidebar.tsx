@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -44,44 +43,6 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const dispatch = useAppDispatch();
-
-  useEffect(() => {
-    dispatch(
-      workspaceApi.util.prefetch(
-        "getContacts",
-        { workspaceSlug },
-        { ifOlderThan: 60 },
-      ),
-    );
-    dispatch(
-      workspaceApi.util.prefetch(
-        "getOrganizations",
-        { workspaceSlug },
-        { ifOlderThan: 60 },
-      ),
-    );
-    dispatch(
-      workspaceApi.util.prefetch(
-        "getFolders",
-        { workspaceSlug },
-        { ifOlderThan: 60 },
-      ),
-    );
-    dispatch(
-      workspaceApi.util.prefetch(
-        "getWorkspaceActivities",
-        { workspaceSlug },
-        { ifOlderThan: 60 },
-      ),
-    );
-    dispatch(
-      workspaceApi.util.prefetch(
-        "getWorkspaceMembers",
-        { workspaceSlug },
-        { ifOlderThan: 60 },
-      ),
-    );
-  }, [dispatch, workspaceSlug]);
 
   function prefetchSection(section: string) {
     if (section === "contacts") {

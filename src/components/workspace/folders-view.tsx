@@ -44,7 +44,7 @@ export function FoldersView({
     const formData = new FormData(event.currentTarget);
 
     try {
-      await createFolder({
+      const request = createFolder({
         payload: {
           name: String(formData.get("name") ?? ""),
         },
@@ -52,6 +52,7 @@ export function FoldersView({
       }).unwrap();
       formRef.current?.reset();
       setIsCreateModalOpen(false);
+      await request;
       showSuccess("Folder created.");
     } catch (error) {
       showError(getErrorMessage(error));

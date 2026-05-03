@@ -1,36 +1,29 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-
+import {
+  cancelWorkspaceInvitationAction,
+  inviteWorkspaceMemberAction,
+  removeWorkspaceMemberAction,
+  updateProfileAction,
+  updateWorkspaceSettingsAction,
+} from "@/actions/settings";
 import { DataTable } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { FieldLabel, TextInput } from "@/components/form-controls";
 import { NoticeBanner } from "@/components/notice-banner";
 import { PageHeader } from "@/components/page-header";
 import { SubmitButton } from "@/components/submit-button";
-import { useNoticeState } from "@/components/workspace/use-notice-state";
-import { formatDate, getErrorMessage } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import type {
   WorkspaceInvitationSummary,
   WorkspaceMemberSummary,
 } from "@/lib/data";
-import {
-  useCancelWorkspaceInvitationMutation,
-  useGetWorkspaceInvitationsQuery,
-  useGetWorkspaceMembersQuery,
-  useInviteWorkspaceMemberMutation,
-  useRemoveWorkspaceMemberMutation,
-  useUpdateProfileMutation,
-  useUpdateWorkspaceSettingsMutation,
-  workspaceQueryOptions,
-} from "@/store/workspace-api";
+import { useGetWorkspaceMembersQuery, workspaceQueryOptions } from "@/store/workspace-api";
 
 type SettingsViewProps = {
   canManageMembers: boolean;
   currentUserEmail: string;
   currentUserFullName: string | null;
-  currentUserId: string;
   error?: string;
   initialInvitations: WorkspaceInvitationSummary[];
   invitationsEnabled: boolean;
@@ -44,7 +37,6 @@ export function SettingsView({
   canManageMembers,
   currentUserEmail,
   currentUserFullName,
-  currentUserId,
   error,
   initialInvitations,
   invitationsEnabled,
@@ -53,148 +45,20 @@ export function SettingsView({
   workspaceName,
   workspaceSlug,
 }: SettingsViewProps) {
-  const router = useRouter();
-  const [, startTransition] = useTransition();
-  const [profileName, setProfileName] = useState(currentUserFullName ?? "");
-  const [workspaceNameValue, setWorkspaceNameValue] = useState(workspaceName);
-  const [pendingMemberId, setPendingMemberId] = useState<string | null>(null);
-  const [pendingInvitationId, setPendingInvitationId] = useState<string | null>(null);
-  const inviteFormRef = useRef<HTMLFormElement | null>(null);
-  const { error: noticeError, showError, showSuccess, success: noticeSuccess } =
-    useNoticeState(error, success);
   const queryArg = { workspaceSlug };
-  const membersQuery = useGetWorkspaceMembersQuery(queryArg, workspaceQueryOptions);
-  const invitationsQuery = useGetWorkspaceInvitationsQuery(queryArg, workspaceQueryOptions);
-  const [updateProfile, updateProfileState] = useUpdateProfileMutation();
-  const [updateWorkspaceSettings, updateWorkspaceSettingsState] =
-    useUpdateWorkspaceSettingsMutation();
-  const [inviteWorkspaceMember, inviteWorkspaceMemberState] = useInviteWorkspaceMemberMutation();
-  const [cancelWorkspaceInvitation] = useCancelWorkspaceInvitationMutation();
-  const [removeWorkspaceMember] = useRemoveWorkspaceMemberMutation();
-  const members = membersQuery.data ?? initialMembers;
-  const invitationState = invitationsQuery.data ?? {
-    invitations: initialInvitations,
-    isAvailable: invitationsEnabled,
-  };
-  const pendingInvitations = invitationState.invitations;
-  const canUseInvitations = invitationState.isAvailable;
-  const currentMember = members.find((member) => member.userId === currentUserId);
-
-  async function handleProfileSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    try {
-      const result = await updateProfile({
-        payload: {
-          fullName: profileName,
-        },
-        userId: currentUserId,
-        workspaceSlug,
-      }).unwrap();
-
-      setProfileName(result.profile.fullName ?? profileName);
-      showSuccess(
-        result.profileWriteDeferred && result.guidance
-          ? `Profile updated in your account. ${result.guidance}`
-          : "Profile updated.",
-      );
-      startTransition(() => {
-        router.refresh();
-      });
-    } catch (updateError) {
-      showError(getErrorMessage(updateError));
-    }
-  }
-
-  async function handleWorkspaceSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    try {
-      const result = await updateWorkspaceSettings({
-        payload: {
-          name: workspaceNameValue,
-        },
-        workspaceSlug,
-      }).unwrap();
-
-      setWorkspaceNameValue(result.workspace.name);
-      showSuccess("Workspace updated.");
-      startTransition(() => {
-        router.refresh();
-      });
-    } catch (updateError) {
-      showError(getErrorMessage(updateError));
-    }
-  }
-
-  async function handleInviteSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-
-    try {
-      const result = await inviteWorkspaceMember({
-        optimistic: {
-          invitedByEmail: currentUserEmail,
-          invitedByName: currentMember?.fullName ?? currentUserFullName,
-        },
-        payload: {
-          email: String(formData.get("email") ?? ""),
-        },
-        workspaceSlug,
-      }).unwrap();
-
-      inviteFormRef.current?.reset();
-      showSuccess(
-        result.alreadyMember
-          ? "That person already has workspace access."
-          : "Invitation saved. The invite will activate when that email signs in.",
-      );
-    } catch (inviteError) {
-      showError(getErrorMessage(inviteError));
-    }
-  }
-
-  async function handleRemoveMember(userId: string) {
-    setPendingMemberId(userId);
-
-    try {
-      await removeWorkspaceMember({
-        userId,
-        workspaceSlug,
-      }).unwrap();
-      showSuccess("Member removed.");
-    } catch (removeError) {
-      showError(getErrorMessage(removeError));
-    } finally {
-      setPendingMemberId(null);
-    }
-  }
-
-  async function handleCancelInvitation(invitationId: string) {
-    setPendingInvitationId(invitationId);
-
-    try {
-      await cancelWorkspaceInvitation({
-        invitationId,
-        workspaceSlug,
-      }).unwrap();
-      showSuccess("Invitation cancelled.");
-    } catch (cancelError) {
-      showError(getErrorMessage(cancelError));
-    } finally {
-      setPendingInvitationId(null);
-    }
-  }
+  const { data, isFetching } = useGetWorkspaceMembersQuery(queryArg, workspaceQueryOptions);
+  const members = data ?? initialMembers;
+  const pendingInvitations = initialInvitations;
 
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow={workspaceNameValue}
+        eyebrow={workspaceName}
         title="Settings"
         description="Manage workspace metadata and review current members."
       />
 
-      <NoticeBanner error={noticeError} success={noticeSuccess} />
+      <NoticeBanner error={error} success={success} />
 
       <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="space-y-6">
@@ -203,14 +67,14 @@ export function SettingsView({
             <p className="mt-3 text-sm leading-6 text-muted">
               Update the personal name shown across member lists and assignment controls.
             </p>
-            <form onSubmit={handleProfileSubmit} className="mt-6 space-y-4">
+            <form action={updateProfileAction} className="mt-6 space-y-4">
+              <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
               <div>
                 <FieldLabel htmlFor="fullName">Full name</FieldLabel>
                 <TextInput
                   id="fullName"
                   name="fullName"
-                  value={profileName}
-                  onChange={(event) => setProfileName(event.target.value)}
+                  defaultValue={currentUserFullName ?? ""}
                   placeholder="Jane Doe"
                   required
                 />
@@ -219,30 +83,23 @@ export function SettingsView({
                 <FieldLabel htmlFor="profile-email">Email</FieldLabel>
                 <TextInput id="profile-email" value={currentUserEmail} readOnly />
               </div>
-              <SubmitButton loading={updateProfileState.isLoading}>Save profile</SubmitButton>
+              <SubmitButton>Save profile</SubmitButton>
             </form>
           </div>
 
           <div className="panel rounded-[28px] p-6">
             <h2 className="text-lg font-semibold text-foreground">Workspace details</h2>
-            <form onSubmit={handleWorkspaceSubmit} className="mt-6 space-y-4">
+            <form action={updateWorkspaceSettingsAction} className="mt-6 space-y-4">
+              <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
               <div>
                 <FieldLabel htmlFor="name">Name</FieldLabel>
-                <TextInput
-                  id="name"
-                  name="name"
-                  value={workspaceNameValue}
-                  onChange={(event) => setWorkspaceNameValue(event.target.value)}
-                  required
-                />
+                <TextInput id="name" name="name" defaultValue={workspaceName} required />
               </div>
               <div>
                 <FieldLabel htmlFor="slug">Slug</FieldLabel>
                 <TextInput id="slug" value={workspaceSlug} readOnly />
               </div>
-              <SubmitButton loading={updateWorkspaceSettingsState.isLoading}>
-                Save settings
-              </SubmitButton>
+              <SubmitButton>Save settings</SubmitButton>
             </form>
           </div>
 
@@ -252,7 +109,7 @@ export function SettingsView({
               Invite people with their email address. If they do not have an account yet, access
               will activate automatically once they sign in with the same email.
             </p>
-            {!canUseInvitations ? (
+            {!invitationsEnabled ? (
               <div className="mt-5 rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-6 text-muted">
                 Email invitations are unavailable until
                 {" "}
@@ -261,7 +118,8 @@ export function SettingsView({
                 is applied.
               </div>
             ) : canManageMembers ? (
-              <form ref={inviteFormRef} onSubmit={handleInviteSubmit} className="mt-5 space-y-4">
+              <form action={inviteWorkspaceMemberAction} className="mt-5 space-y-4">
+                <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
                 <div>
                   <FieldLabel htmlFor="invite-email">Email</FieldLabel>
                   <TextInput
@@ -272,7 +130,7 @@ export function SettingsView({
                     required
                   />
                 </div>
-                <SubmitButton loading={inviteWorkspaceMemberState.isLoading}>Send invite</SubmitButton>
+                <SubmitButton>Send invite</SubmitButton>
               </form>
             ) : (
               <div className="mt-5 rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-6 text-muted">
@@ -285,7 +143,7 @@ export function SettingsView({
         <div className="space-y-6">
           <div className="panel rounded-[24px] px-4 py-3 text-sm text-muted">
             {members.length} members currently have access to this workspace.
-            {membersQuery.isFetching ? " Refreshing..." : ""}
+            {isFetching ? " Refreshing..." : ""}
           </div>
           <div className="mt-4">
             <DataTable
@@ -331,14 +189,13 @@ export function SettingsView({
                   className: "w-[120px]",
                   render: (member) =>
                     canManageMembers && member.role !== "owner" ? (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMember(member.userId)}
-                        disabled={pendingMemberId === member.userId}
-                        className="text-sm text-danger hover:text-[#fca5a5] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {pendingMemberId === member.userId ? "Removing..." : "Remove"}
-                      </button>
+                      <form action={removeWorkspaceMemberAction}>
+                        <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
+                        <input type="hidden" name="userId" value={member.userId} />
+                        <button className="text-sm text-danger hover:text-[#fca5a5]">
+                          Remove
+                        </button>
+                      </form>
                     ) : (
                       <span className="text-sm text-muted">
                         {member.role === "owner" ? "Owner" : "—"}
@@ -351,7 +208,7 @@ export function SettingsView({
 
           <div>
             <div className="panel rounded-[24px] px-4 py-3 text-sm text-muted">
-              {canUseInvitations
+              {invitationsEnabled
                 ? `${pendingInvitations.length} pending invitation${pendingInvitations.length === 1 ? "" : "s"}.`
                 : "Pending email invitations are unavailable until migration 0002 is applied."}
             </div>
@@ -360,9 +217,9 @@ export function SettingsView({
                 data={pendingInvitations}
                 emptyState={
                   <EmptyState
-                    title={canUseInvitations ? "No pending invitations" : "Invitations unavailable"}
+                    title={invitationsEnabled ? "No pending invitations" : "Invitations unavailable"}
                     description={
-                      canUseInvitations
+                      invitationsEnabled
                         ? "Email invites waiting for acceptance will appear here."
                         : "Apply migration 0002 to enable email invitations for this workspace."
                     }
@@ -404,15 +261,14 @@ export function SettingsView({
                     header: "Actions",
                     className: "w-[120px]",
                     render: (invitation) =>
-                      canManageMembers && canUseInvitations ? (
-                        <button
-                          type="button"
-                          onClick={() => handleCancelInvitation(invitation.id)}
-                          disabled={pendingInvitationId === invitation.id}
-                          className="text-sm text-danger hover:text-[#fca5a5] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {pendingInvitationId === invitation.id ? "Cancelling..." : "Cancel"}
-                        </button>
+                      canManageMembers && invitationsEnabled ? (
+                        <form action={cancelWorkspaceInvitationAction}>
+                          <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
+                          <input type="hidden" name="invitationId" value={invitation.id} />
+                          <button className="text-sm text-danger hover:text-[#fca5a5]">
+                            Cancel
+                          </button>
+                        </form>
                       ) : (
                         <span className="text-sm text-muted">—</span>
                       ),

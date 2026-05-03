@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { getContacts, getWorkspaceContext } from "@/lib/data";
-import { createContactRecord } from "@/lib/workspace-mutations";
+import { getWorkspaceContext, getWorkspaceInvitations } from "@/lib/data";
+import { inviteWorkspaceMemberRecord } from "@/lib/workspace-mutations";
 import { getErrorMessage } from "@/lib/utils";
-import type { CreateContactPayload } from "@/lib/workspace-mutation-types";
+import type { InviteWorkspaceMemberPayload } from "@/lib/workspace-mutation-types";
 
 export async function GET(
   _request: Request,
@@ -11,9 +11,9 @@ export async function GET(
 ) {
   const { workspaceSlug } = await params;
   const { workspace } = await getWorkspaceContext(workspaceSlug);
-  const contacts = await getContacts(workspace.id);
+  const invitations = await getWorkspaceInvitations(workspace.id);
 
-  return NextResponse.json(contacts);
+  return NextResponse.json(invitations);
 }
 
 export async function POST(
@@ -22,8 +22,8 @@ export async function POST(
 ) {
   try {
     const { workspaceSlug } = await params;
-    const payload = (await request.json()) as CreateContactPayload;
-    const result = await createContactRecord(workspaceSlug, payload);
+    const payload = (await request.json()) as InviteWorkspaceMemberPayload;
+    const result = await inviteWorkspaceMemberRecord(workspaceSlug, payload);
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

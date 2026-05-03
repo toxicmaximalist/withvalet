@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 
+import { acceptPendingWorkspaceInvitations } from "@/lib/auth";
 import { buildPathWithMessage } from "@/lib/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { loginSchema, signupSchema } from "@/lib/validators";
@@ -23,6 +24,7 @@ export async function loginAction(formData: FormData) {
     redirect(buildPathWithMessage("/login", "error", error.message));
   }
 
+  await acceptPendingWorkspaceInvitations(supabase);
   redirect("/workspaces");
 }
 
@@ -38,7 +40,7 @@ export async function signupAction(formData: FormData) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
@@ -50,6 +52,10 @@ export async function signupAction(formData: FormData) {
 
   if (error) {
     redirect(buildPathWithMessage("/signup", "error", error.message));
+  }
+
+  if (data.session) {
+    await acceptPendingWorkspaceInvitations(supabase);
   }
 
   redirect("/workspaces");

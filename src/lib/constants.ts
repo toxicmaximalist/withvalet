@@ -1,54 +1,54 @@
 export const CONTACT_STATUSES = [
-  "new",
+  "fresh",
   "contacted",
   "replied",
+  "followed_up",
+  "call_scheduled",
+  "call_done",
   "interested",
   "not_interested",
-  "meeting_scheduled",
-  "closed",
-  "archived",
+  "ghosted",
 ] as const;
 
 export const ACTIVITY_TYPES = [
   "email",
-  "linkedin",
-  "telegram",
-  "whatsapp",
+  "linkedin_message",
+  "follow_up",
   "call",
-  "meeting",
-  "note",
+  "demo",
+  "telegram_message",
 ] as const;
 
 export const ACTIVITY_STATUSES = [
   "planned",
   "sent",
   "replied",
-  "completed",
-  "failed",
+  "followed_up_1",
+  "followed_up_2",
 ] as const;
 
 export const WORKSPACE_MEMBER_ROLES = ["owner", "member"] as const;
 
 export const CONTACT_STATUS_LABELS: Record<(typeof CONTACT_STATUSES)[number], string> =
   {
-    new: "New",
+    fresh: "Fresh",
     contacted: "Contacted",
     replied: "Replied",
+    followed_up: "Followed up",
+    call_scheduled: "Call scheduled",
+    call_done: "Call done",
     interested: "Interested",
     not_interested: "Not interested",
-    meeting_scheduled: "Meeting scheduled",
-    closed: "Closed",
-    archived: "Archived",
+    ghosted: "Ghosted",
   };
 
 export const ACTIVITY_TYPE_LABELS: Record<(typeof ACTIVITY_TYPES)[number], string> = {
   email: "Email",
-  linkedin: "LinkedIn",
-  telegram: "Telegram",
-  whatsapp: "WhatsApp",
+  linkedin_message: "LinkedIn message",
+  follow_up: "Follow up",
   call: "Call",
-  meeting: "Meeting",
-  note: "Note",
+  demo: "Demo",
+  telegram_message: "Telegram message",
 };
 
 export const ACTIVITY_STATUS_LABELS: Record<
@@ -58,6 +58,6 @@ export const ACTIVITY_STATUS_LABELS: Record<
   planned: "Planned",
   sent: "Sent",
   replied: "Replied",
-  completed: "Completed",
-  failed: "Failed",
+  followed_up_1: "Followed up 1",
+  followed_up_2: "Followed up 2",
 };

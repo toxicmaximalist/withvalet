@@ -407,52 +407,87 @@ function normalizeContactStatusValue(value: string) {
   const normalized = normalizeHeaderKey(value);
 
   if (!normalized) {
-    return "new" satisfies Database["public"]["Enums"]["contact_status"];
+    return "fresh" satisfies Database["public"]["Enums"]["contact_status"];
   }
 
   const mapping: Record<string, Database["public"]["Enums"]["contact_status"]> = {
-    archived: "archived",
-    "დაარქივებული": "archived",
-    closed: "closed",
-    "დახურული": "closed",
+    archived: "not_interested",
+    "დაარქივებული": "not_interested",
+    call: "call_done",
+    "call complete": "call_done",
+    "call completed": "call_done",
+    "call done": "call_done",
+    "call finished": "call_done",
+    "completed call": "call_done",
+    closed: "not_interested",
+    "დახურული": "not_interested",
     contacted: "contacted",
     "დაკონტაქტებული": "contacted",
+    fresh: "fresh",
+    followup: "followed_up",
+    "follow up": "followed_up",
+    "follow-up": "followed_up",
+    followed: "followed_up",
+    "followed up": "followed_up",
+    "followed-up": "followed_up",
+    "გავყევით": "followed_up",
+    "მიყოლა": "followed_up",
+    ghosted: "ghosted",
+    "გაქრა": "ghosted",
+    "აღარ პასუხობს": "ghosted",
     interested: "interested",
     "დაინტერესებული": "interested",
-    "meeting scheduled": "meeting_scheduled",
-    meeting: "meeting_scheduled",
-    "შეხვედრა": "meeting_scheduled",
-    "შეხვედრა ჩანიშნულია": "meeting_scheduled",
+    "call booked": "call_scheduled",
+    "call scheduled": "call_scheduled",
+    "call set": "call_scheduled",
+    meeting: "call_scheduled",
+    "meeting scheduled": "call_scheduled",
+    scheduled: "call_scheduled",
+    "scheduled call": "call_scheduled",
+    "შეხვედრა": "call_scheduled",
+    "შეხვედრა ჩანიშნულია": "call_scheduled",
     "not interested": "not_interested",
     "no interest": "not_interested",
     "არ არის დაინტერესებული": "not_interested",
     "არაინტერესდება": "not_interested",
-    new: "new",
-    "ახალი": "new",
+    new: "fresh",
+    "ახალი": "fresh",
     replied: "replied",
     response: "replied",
     "უპასუხა": "replied",
     "პასუხი": "replied",
   };
 
-  return mapping[normalized] ?? "new";
+  return mapping[normalized] ?? "fresh";
 }
 
 function normalizeActivityStatusValue(value: string) {
   const normalized = normalizeHeaderKey(value);
 
   if (!normalized) {
-    return "completed" satisfies Database["public"]["Enums"]["activity_status"];
+    return "sent" satisfies Database["public"]["Enums"]["activity_status"];
   }
 
   const mapping: Record<string, Database["public"]["Enums"]["activity_status"]> = {
-    completed: "completed",
-    "დასრულებული": "completed",
-    "შესრულებული": "completed",
-    done: "completed",
-    failed: "failed",
-    "ჩავარდა": "failed",
-    "წარუმატებელი": "failed",
+    completed: "sent",
+    "დასრულებული": "sent",
+    "შესრულებული": "sent",
+    done: "sent",
+    failed: "followed_up_2",
+    "ჩავარდა": "followed_up_2",
+    "წარუმატებელი": "followed_up_2",
+    "follow up 1": "followed_up_1",
+    "follow-up 1": "followed_up_1",
+    "first follow up": "followed_up_1",
+    "first follow-up": "followed_up_1",
+    "followed up 1": "followed_up_1",
+    "followed-up 1": "followed_up_1",
+    "follow up 2": "followed_up_2",
+    "follow-up 2": "followed_up_2",
+    "second follow up": "followed_up_2",
+    "second follow-up": "followed_up_2",
+    "followed up 2": "followed_up_2",
+    "followed-up 2": "followed_up_2",
     planned: "planned",
     "დაგეგმილი": "planned",
     replied: "replied",
@@ -463,7 +498,7 @@ function normalizeActivityStatusValue(value: string) {
     "გაგზავნილი": "sent",
   };
 
-  return mapping[normalized] ?? "completed";
+  return mapping[normalized] ?? "sent";
 }
 
 function normalizeActivityTypeValue(value: string) {
@@ -473,29 +508,36 @@ function normalizeActivityTypeValue(value: string) {
     call: "call",
     calls: "call",
     "ზარი": "call",
+    demo: "demo",
+    demos: "demo",
     email: "email",
     emails: "email",
     "ელფოსტა": "email",
     "იმეილი": "email",
     "ემაილი": "email",
-    linkedin: "linkedin",
-    "linkedin message": "linkedin",
-    "ლინკედინი": "linkedin",
-    meeting: "meeting",
-    meetings: "meeting",
-    "შეხვედრა": "meeting",
-    note: "note",
-    notes: "note",
-    "შენიშვნა": "note",
-    "კომენტარი": "note",
-    telegram: "telegram",
-    "ტელეგრამი": "telegram",
-    whatsapp: "whatsapp",
-    "ვოთსაფი": "whatsapp",
-    "ვაცაპი": "whatsapp",
+    followup: "follow_up",
+    "follow up": "follow_up",
+    "follow-up": "follow_up",
+    "შემდგომი მიწერა": "follow_up",
+    linkedin: "linkedin_message",
+    "linkedin message": "linkedin_message",
+    "ლინკედინი": "linkedin_message",
+    meeting: "demo",
+    meetings: "demo",
+    "შეხვედრა": "demo",
+    note: "follow_up",
+    notes: "follow_up",
+    "შენიშვნა": "follow_up",
+    "კომენტარი": "follow_up",
+    telegram: "telegram_message",
+    "telegram message": "telegram_message",
+    "ტელეგრამი": "telegram_message",
+    whatsapp: "telegram_message",
+    "ვოთსაფი": "telegram_message",
+    "ვაცაპი": "telegram_message",
   };
 
-  return mapping[normalized] ?? "note";
+  return mapping[normalized] ?? "follow_up";
 }
 
 function parseContactsDeterministically(rows: WorkbookRow[]) {
@@ -718,7 +760,7 @@ async function parseContactsWithOpenAI(rows: WorkbookRow[]) {
         {
           role: "system",
           content:
-            "You convert spreadsheet rows into CRM contacts. You may receive English or Georgian headers and values. Use the row values exactly when possible. Return one contact per valid person row. Use empty strings for unknown text fields. Normalize status to one of: new, contacted, replied, interested, not_interested, meeting_scheduled, closed, archived. Ignore rows that are not actual contacts.",
+            "You convert spreadsheet rows into CRM contacts. You may receive English or Georgian headers and values. Use the row values exactly when possible. Return one contact per valid person row. Use empty strings for unknown text fields. Normalize status to one of: fresh, contacted, replied, followed_up, call_scheduled, call_done, interested, not_interested, ghosted. Ignore rows that are not actual contacts.",
         },
         {
           role: "user",
@@ -759,7 +801,7 @@ async function parseActivitiesWithOpenAI(rows: WorkbookRow[]) {
         {
           role: "system",
           content:
-            "You convert spreadsheet rows into outreach activity records. You may receive English or Georgian headers and values. Return only rows that represent outreach touchpoints. Use empty strings for unknown text fields. Normalize type to one of: email, linkedin, telegram, whatsapp, call, meeting, note. Normalize status to one of: planned, sent, replied, completed, failed. Normalize contactStatus to one of: new, contacted, replied, interested, not_interested, meeting_scheduled, closed, archived.",
+            "You convert spreadsheet rows into outreach activity records. You may receive English or Georgian headers and values. Return only rows that represent outreach touchpoints. Use empty strings for unknown text fields. Normalize type to one of: email, linkedin_message, follow_up, call, demo, telegram_message. Normalize status to one of: planned, sent, replied, followed_up_1, followed_up_2. Normalize contactStatus to one of: fresh, contacted, replied, followed_up, call_scheduled, call_done, interested, not_interested, ghosted.",
         },
         {
           role: "user",

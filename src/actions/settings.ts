@@ -1,12 +1,19 @@
 "use server";
-
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { getWorkspaceContext } from "@/lib/data";
 import { redirectWithMessage } from "@/lib/navigation";
-import { getErrorMessage } from "@/lib/utils";
-import { workspaceInviteSchema, workspaceSchema } from "@/lib/validators";
+import {
+  getErrorMessage,
+  getSupabaseMigrationGuidance,
+  isProfilesPolicyError,
+  isWorkspaceInvitationFeatureUnavailableError,
+} from "@/lib/utils";
+import {
+  profileSchema,
+  workspaceInviteSchema,
+  workspaceSchema,
+} from "@/lib/validators";
 
 const workspaceMemberActionSchema = z.object({
   targetId: z.uuid(),
@@ -46,18 +53,82 @@ export async function updateWorkspaceSettingsAction(formData: FormData) {
     .eq("id", workspace.id);
 
   if (error) {
+    const message = getErrorMessage(error);
+
+    if (isWorkspaceInvitationFeatureUnavailableError(message)) {
+      redirectWithMessage(
+        `/workspaces/${workspaceSlug}/settings`,
+        "error",
+        getSupabaseMigrationGuidance(message),
+      );
+    }
+
     redirectWithMessage(
       `/workspaces/${workspaceSlug}/settings`,
       "error",
-      getErrorMessage(error),
+      message,
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/settings`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/settings`,
     "success",
     "Workspace updated.",
+  );
+}
+
+export async function updateProfileAction(formData: FormData) {
+  const workspaceSlug = String(formData.get("workspaceSlug") ?? "");
+  const { supabase, user } = await getWorkspaceContext(workspaceSlug);
+
+  const parsed = profileSchema.safeParse({
+    fullName: formData.get("fullName"),
+  });
+
+  if (!parsed.success) {
+    redirectWithMessage(
+      `/workspaces/${workspaceSlug}/settings`,
+      "error",
+      parsed.error.issues[0]?.message ?? "Invalid profile details.",
+    );
+  }
+
+  const { error: authError } = await supabase.auth.updateUser({
+    data: {
+      full_name: parsed.data.fullName,
+    },
+  });
+
+  if (authError) {
+    redirectWithMessage(
+      `/workspaces/${workspaceSlug}/settings`,
+      "error",
+      authError.message,
+    );
+  }
+
+  const { error: profileError } = await supabase
+    .from("profiles")
+    .upsert({
+      email: user.email ?? "",
+      full_name: parsed.data.fullName,
+      id: user.id,
+    });
+
+  if (profileError && !isProfilesPolicyError(getErrorMessage(profileError))) {
+    redirectWithMessage(
+      `/workspaces/${workspaceSlug}/settings`,
+      "error",
+      getErrorMessage(profileError),
+    );
+  }
+
+  redirectWithMessage(
+    `/workspaces/${workspaceSlug}/settings`,
+    "success",
+    profileError
+      ? `Profile updated in your account. ${getSupabaseMigrationGuidance(getErrorMessage(profileError))}`
+      : "Profile updated.",
   );
 }
 
@@ -70,14 +141,23 @@ export async function regenerateInviteCodeAction(formData: FormData) {
   });
 
   if (error) {
+    const message = getErrorMessage(error);
+
+    if (isWorkspaceInvitationFeatureUnavailableError(message)) {
+      redirectWithMessage(
+        `/workspaces/${workspaceSlug}/settings`,
+        "error",
+        getSupabaseMigrationGuidance(message),
+      );
+    }
+
     redirectWithMessage(
       `/workspaces/${workspaceSlug}/settings`,
       "error",
-      getErrorMessage(error),
+      message,
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/settings`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/settings`,
     "success",
@@ -162,7 +242,6 @@ export async function inviteWorkspaceMemberAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/settings`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/settings`,
     "success",
@@ -201,7 +280,6 @@ export async function cancelWorkspaceInvitationAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/settings`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/settings`,
     "success",
@@ -248,10 +326,6 @@ export async function removeWorkspaceMemberAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/settings`);
-  revalidatePath(`/workspaces/${workspaceSlug}/contacts`);
-  revalidatePath(`/workspaces/${workspaceSlug}/organizations`);
-  revalidatePath(`/workspaces/${workspaceSlug}/folders`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/settings`,
     "success",

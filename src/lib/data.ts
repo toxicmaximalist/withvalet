@@ -2,7 +2,10 @@ import { cache } from "react";
 import { notFound, redirect } from "next/navigation";
 
 import { requireUser } from "@/lib/auth";
-import { getErrorMessage } from "@/lib/utils";
+import {
+  getErrorMessage,
+  isWorkspaceInvitationFeatureUnavailableError,
+} from "@/lib/utils";
 import type { Database } from "@/types/database";
 
 type ContactRow = Database["public"]["Tables"]["contacts"]["Row"];
@@ -15,6 +18,12 @@ type WorkspaceRole = Database["public"]["Enums"]["workspace_role"];
 
 export type WorkspaceSummary = WorkspaceRow & {
   role: WorkspaceRole;
+};
+
+export type CurrentUserProfile = {
+  email: string;
+  fullName: string | null;
+  userId: string;
 };
 
 export type WorkspaceMemberSummary = {
@@ -32,6 +41,11 @@ export type WorkspaceInvitationSummary = {
   invitedByEmail: string | null;
   invitedByName: string | null;
   role: WorkspaceRole;
+};
+
+export type WorkspaceInvitationsState = {
+  invitations: WorkspaceInvitationSummary[];
+  isAvailable: boolean;
 };
 
 export type ContactListItem = ContactRow & {
@@ -73,15 +87,73 @@ function mapById<T extends { id: string }>(items: T[]) {
   return new Map(items.map((item) => [item.id, item]));
 }
 
+const getWorkspaceMemberProfiles = cache(async (workspaceId: string) => {
+  const { supabase, user } = await requireUser();
+  const currentUserFullName =
+    typeof user.user_metadata?.full_name === "string" && user.user_metadata.full_name.trim().length
+      ? user.user_metadata.full_name.trim()
+      : null;
+
+  const { data: memberships, error: membershipsError } = await supabase
+    .from("workspace_members")
+    .select("user_id, role, created_at")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: true });
+
+  if (membershipsError) {
+    throw new Error(getErrorMessage(membershipsError));
+  }
+
+  const userIds = memberships?.map((membership) => membership.user_id) ?? [];
+
+  if (!userIds.length) {
+    return {
+      currentUserId: user.id,
+      currentUserEmail: user.email ?? "Unknown",
+      currentUserFullName,
+      memberships: [],
+      profileMap: new Map<string, { email: string; full_name: string | null }>(),
+    };
+  }
+
+  const { data: profiles, error: profilesError } = await supabase
+    .from("profiles")
+    .select("id, email, full_name")
+    .in("id", userIds);
+
+  if (profilesError) {
+    throw new Error(getErrorMessage(profilesError));
+  }
+
+  return {
+    currentUserId: user.id,
+    currentUserEmail: user.email ?? "Unknown",
+    currentUserFullName,
+    memberships: memberships ?? [],
+    profileMap: new Map((profiles ?? []).map((profile) => [profile.id, profile])),
+  };
+});
+
 async function getWorkspaceMemberProfileMap(workspaceId: string) {
-  const members = await getWorkspaceMembers(workspaceId);
+  const {
+    currentUserEmail,
+    currentUserFullName,
+    currentUserId,
+    memberships,
+    profileMap,
+  } =
+    await getWorkspaceMemberProfiles(workspaceId);
 
   return new Map(
-    members.map((member) => [
-      member.userId,
+    memberships.map((membership) => [
+      membership.user_id,
       {
-        email: member.email,
-        fullName: member.fullName,
+        email:
+          profileMap.get(membership.user_id)?.email ??
+          (membership.user_id === currentUserId ? currentUserEmail : "Unknown"),
+        fullName:
+          profileMap.get(membership.user_id)?.full_name ??
+          (membership.user_id === currentUserId ? currentUserFullName : null),
       },
     ]),
   );
@@ -130,6 +202,47 @@ export const getAccessibleWorkspaces = cache(async (userId?: string) => {
 
 export const getWorkspaceContext = cache(async (slug: string) => {
   const { supabase, user } = await requireUser();
+  const { data: workspace, error: workspaceError } = await supabase
+    .from("workspaces")
+    .select("*")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (workspaceError) {
+    throw new Error(getErrorMessage(workspaceError));
+  }
+
+  if (!workspace) {
+    redirect("/workspaces");
+  }
+
+  const { data: membership, error: membershipError } = await supabase
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", workspace.id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (membershipError) {
+    throw new Error(getErrorMessage(membershipError));
+  }
+
+  if (!membership) {
+    redirect("/workspaces");
+  }
+
+  return {
+    supabase,
+    user,
+    workspace: {
+      ...workspace,
+      role: membership.role,
+    },
+  };
+});
+
+export const getWorkspaceLayoutContext = cache(async (slug: string) => {
+  const { supabase, user } = await requireUser();
   const workspaces = await getAccessibleWorkspaces(user.id);
   const workspace = workspaces.find((entry) => entry.slug === slug);
 
@@ -141,46 +254,51 @@ export const getWorkspaceContext = cache(async (slug: string) => {
 });
 
 export async function getWorkspaceMembers(workspaceId: string) {
-  const { supabase } = await requireUser();
-
-  const { data: memberships, error: membershipsError } = await supabase
-    .from("workspace_members")
-    .select("user_id, role, created_at")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: true });
-
-  if (membershipsError) {
-    throw new Error(getErrorMessage(membershipsError));
-  }
-
-  const userIds = memberships?.map((membership) => membership.user_id) ?? [];
-
-  if (!userIds.length) {
-    return [] as WorkspaceMemberSummary[];
-  }
-
-  const { data: profiles, error: profilesError } = await supabase
-    .from("profiles")
-    .select("id, email, full_name")
-    .in("id", userIds);
-
-  if (profilesError) {
-    throw new Error(getErrorMessage(profilesError));
-  }
-
-  const profileMap = new Map(
-    (profiles ?? []).map((profile) => [profile.id, profile]),
-  );
+  const {
+    currentUserId,
+    currentUserEmail,
+    currentUserFullName,
+    memberships,
+    profileMap,
+  } = await getWorkspaceMemberProfiles(workspaceId);
 
   return (
     memberships?.map((membership) => ({
       createdAt: membership.created_at,
-      email: profileMap.get(membership.user_id)?.email ?? "Unknown",
-      fullName: profileMap.get(membership.user_id)?.full_name ?? null,
+      email:
+        profileMap.get(membership.user_id)?.email ??
+        (membership.user_id === currentUserId ? currentUserEmail : "Unknown"),
+      fullName:
+        profileMap.get(membership.user_id)?.full_name ??
+        (membership.user_id === currentUserId ? currentUserFullName : null),
       role: membership.role,
       userId: membership.user_id,
     })) ?? []
   );
+}
+
+export async function getCurrentUserProfile() {
+  const { supabase, user } = await requireUser();
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("email, full_name")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const fallbackFullName =
+    typeof user.user_metadata?.full_name === "string" && user.user_metadata.full_name.trim().length
+      ? user.user_metadata.full_name.trim()
+      : null;
+
+  return {
+    email: profile?.email ?? user.email ?? "",
+    fullName: profile?.full_name ?? fallbackFullName,
+    userId: user.id,
+  } satisfies CurrentUserProfile;
 }
 
 export async function getWorkspaceInvitations(workspaceId: string) {
@@ -193,6 +311,15 @@ export async function getWorkspaceInvitations(workspaceId: string) {
     .order("created_at", { ascending: true });
 
   if (invitationsError) {
+    const message = getErrorMessage(invitationsError);
+
+    if (isWorkspaceInvitationFeatureUnavailableError(message)) {
+      return {
+        invitations: [],
+        isAvailable: false,
+      } satisfies WorkspaceInvitationsState;
+    }
+
     throw new Error(getErrorMessage(invitationsError));
   }
 
@@ -227,20 +354,22 @@ export async function getWorkspaceInvitations(workspaceId: string) {
     );
   }
 
-  return (
-    (invitations as WorkspaceInvitationRow[] | null)?.map((invitation) => ({
-      createdAt: invitation.created_at,
-      email: invitation.email,
-      id: invitation.id,
-      invitedByEmail: invitation.invited_by
-        ? profileMap.get(invitation.invited_by)?.email ?? null
-        : null,
-      invitedByName: invitation.invited_by
-        ? profileMap.get(invitation.invited_by)?.full_name ?? null
-        : null,
-      role: invitation.role,
-    })) ?? []
-  ) as WorkspaceInvitationSummary[];
+  return {
+    invitations:
+      ((invitations as WorkspaceInvitationRow[] | null)?.map((invitation) => ({
+        createdAt: invitation.created_at,
+        email: invitation.email,
+        id: invitation.id,
+        invitedByEmail: invitation.invited_by
+          ? profileMap.get(invitation.invited_by)?.email ?? null
+          : null,
+        invitedByName: invitation.invited_by
+          ? profileMap.get(invitation.invited_by)?.full_name ?? null
+          : null,
+        role: invitation.role,
+      })) ?? []) as WorkspaceInvitationSummary[],
+    isAvailable: true,
+  } satisfies WorkspaceInvitationsState;
 }
 
 export async function getContacts(workspaceId: string) {

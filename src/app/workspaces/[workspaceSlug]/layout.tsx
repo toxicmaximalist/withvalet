@@ -1,7 +1,7 @@
 import { AppSidebar } from "@/components/app-sidebar";
 import { WorkspacePersistor } from "@/components/workspace-persistor";
 import { WorkspaceTopbar } from "@/components/workspace-topbar";
-import { getWorkspaceContext } from "@/lib/data";
+import { getWorkspaceLayoutContext } from "@/lib/data";
 
 type WorkspaceLayoutProps = {
   children: React.ReactNode;
@@ -13,7 +13,7 @@ export default async function WorkspaceLayout({
   params,
 }: WorkspaceLayoutProps) {
   const { workspaceSlug } = await params;
-  const { workspace, workspaces } = await getWorkspaceContext(workspaceSlug);
+  const { workspace, workspaces } = await getWorkspaceLayoutContext(workspaceSlug);
 
   return (
     <div className="workspace-shell workspace-grid-lines min-h-screen">

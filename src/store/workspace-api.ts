@@ -9,20 +9,36 @@ import type {
   FolderListItem,
   OrganizationDetail,
   OrganizationListItem,
+  WorkspaceInvitationsState,
   WorkspaceMemberSummary,
 } from "@/lib/data";
 import type { ActivityListItem } from "@/lib/data";
 import type {
+  CancelWorkspaceInvitationResponse,
+  CreateContactPayload,
+  CreateContactResponse,
   CreateActivityPayload,
   CreateActivityResponse,
   CreateFolderPayload,
   CreateFolderResponse,
+  DeleteContactResponse,
+  DeleteActivityResponse,
+  DeleteFolderResponse,
+  InviteWorkspaceMemberPayload,
+  InviteWorkspaceMemberResponse,
+  RemoveWorkspaceMemberResponse,
   SyncFolderContactsPayload,
   SyncFolderContactsResponse,
+  UpdateProfilePayload,
+  UpdateProfileResponse,
+  UpdateActivityPayload,
+  UpdateActivityResponse,
   UpdateContactPayload,
   UpdateContactResponse,
   UpdateOrganizationPayload,
   UpdateOrganizationResponse,
+  UpdateWorkspaceSettingsPayload,
+  UpdateWorkspaceSettingsResponse,
 } from "@/lib/workspace-mutation-types";
 import type { Database } from "@/types/database";
 
@@ -46,6 +62,16 @@ type UpdateContactArg = ContactDetailArg & {
   payload: UpdateContactPayload;
 };
 
+type CreateContactArg = WorkspaceSlugArg & {
+  optimistic: {
+    responsibleUserEmail?: string | null;
+    responsibleUserName?: string | null;
+  };
+  payload: CreateContactPayload;
+};
+
+type DeleteContactArg = ContactDetailArg;
+
 type UpdateOrganizationArg = OrganizationDetailArg & {
   payload: UpdateOrganizationPayload;
 };
@@ -53,6 +79,8 @@ type UpdateOrganizationArg = OrganizationDetailArg & {
 type CreateFolderArg = WorkspaceSlugArg & {
   payload: CreateFolderPayload;
 };
+
+type DeleteFolderArg = FolderDetailArg;
 
 type SyncFolderContactsArg = FolderDetailArg & {
   payload: SyncFolderContactsPayload;
@@ -65,6 +93,44 @@ type CreateActivityArg = WorkspaceSlugArg & {
     organizationName?: string | null;
   };
   payload: CreateActivityPayload;
+};
+
+type UpdateActivityArg = WorkspaceSlugArg & {
+  activityId: string;
+  contactId: string;
+  organizationId?: string | null;
+  payload: UpdateActivityPayload;
+};
+
+type DeleteActivityArg = WorkspaceSlugArg & {
+  activityId: string;
+  contactId: string;
+  organizationId?: string | null;
+};
+
+type UpdateProfileArg = WorkspaceSlugArg & {
+  payload: UpdateProfilePayload;
+  userId: string;
+};
+
+type UpdateWorkspaceSettingsArg = WorkspaceSlugArg & {
+  payload: UpdateWorkspaceSettingsPayload;
+};
+
+type InviteWorkspaceMemberArg = WorkspaceSlugArg & {
+  optimistic: {
+    invitedByEmail?: string | null;
+    invitedByName?: string | null;
+  };
+  payload: InviteWorkspaceMemberPayload;
+};
+
+type CancelWorkspaceInvitationArg = WorkspaceSlugArg & {
+  invitationId: string;
+};
+
+type RemoveWorkspaceMemberArg = WorkspaceSlugArg & {
+  userId: string;
 };
 
 function createListTags<TagType extends string>(
@@ -151,7 +217,12 @@ function toContactListItem(contact: ContactDetail): ContactListItem {
 function shouldAffectLastContact(
   status: Database["public"]["Enums"]["activity_status"],
 ) {
-  return status === "sent" || status === "replied" || status === "completed";
+  return (
+    status === "sent" ||
+    status === "replied" ||
+    status === "followed_up_1" ||
+    status === "followed_up_2"
+  );
 }
 
 function getLatestDate(current: string | null | undefined, next: string) {
@@ -162,15 +233,26 @@ function getLatestDate(current: string | null | undefined, next: string) {
   return new Date(next).getTime() > new Date(current).getTime() ? next : current;
 }
 
+function getLastContactDateFromActivities(
+  activities: ActivityListItem[],
+) {
+  return activities.reduce<string | null>((latest, activity) => {
+    if (!shouldAffectLastContact(activity.status)) {
+      return latest;
+    }
+
+    return latest ? getLatestDate(latest, activity.activity_date) : activity.activity_date;
+  }, null);
+}
+
 export const workspaceQueryOptions = {
-  refetchOnFocus: true,
+  refetchOnFocus: false,
   refetchOnMountOrArgChange: false,
-  refetchOnReconnect: true,
+  refetchOnReconnect: false,
 } as const;
 
 export const activityQueryOptions = {
   ...workspaceQueryOptions,
-  pollingInterval: 60_000,
 } as const;
 
 export const workspaceApi = createApi({
@@ -186,6 +268,7 @@ export const workspaceApi = createApi({
     "Folders",
     "Activities",
     "Members",
+    "Invitations",
   ],
   endpoints: (builder) => ({
     getContacts: builder.query<ContactListItem[], WorkspaceSlugArg>({
@@ -255,6 +338,316 @@ export const workspaceApi = createApi({
           id: member.userId,
         }))),
     }),
+    getWorkspaceInvitations: builder.query<WorkspaceInvitationsState, WorkspaceSlugArg>({
+      query: ({ workspaceSlug }) => `/workspaces/${workspaceSlug}/invitations`,
+      providesTags: (result, _error, { workspaceSlug }) =>
+        createListTags("Invitations", `LIST:${workspaceSlug}`, result?.invitations),
+    }),
+    updateProfile: builder.mutation<UpdateProfileResponse, UpdateProfileArg>({
+      query: ({ workspaceSlug, payload }) => ({
+        body: payload,
+        method: "PATCH",
+        url: `/workspaces/${workspaceSlug}/settings/profile`,
+      }),
+      invalidatesTags: (_result, error, { workspaceSlug }) =>
+        error ? [] : [createWorkspaceListTag("Members", workspaceSlug)],
+      async onQueryStarted(
+        { workspaceSlug, userId, payload },
+        { dispatch, getState, queryFulfilled },
+      ) {
+        const fullName = payload.fullName.trim();
+        const state = getState();
+        const contacts = workspaceApi.endpoints.getContacts.select({ workspaceSlug })(state).data ?? [];
+        const contactIds = contacts
+          .filter((contact) => contact.responsible_user_id === userId)
+          .map((contact) => contact.id);
+        const patches = [
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getWorkspaceMembers",
+              { workspaceSlug },
+              (draft) => {
+                const member = draft.find((item) => item.userId === userId);
+
+                if (member) {
+                  member.fullName = fullName;
+                }
+              },
+            ),
+          ),
+          dispatch(
+            workspaceApi.util.updateQueryData("getContacts", { workspaceSlug }, (draft) => {
+              draft.forEach((contact) => {
+                if (contact.responsible_user_id === userId) {
+                  contact.responsibleUserName = fullName;
+                }
+              });
+            }),
+          ),
+        ];
+
+        contactIds.forEach((contactId) => {
+          patches.push(
+            dispatch(
+              workspaceApi.util.updateQueryData(
+                "getContactDetail",
+                { workspaceSlug, contactId },
+                (draft) => {
+                  if (draft.responsible_user_id === userId) {
+                    draft.responsibleUserName = fullName;
+                  }
+                },
+              ),
+            ),
+          );
+        });
+
+        try {
+          const { data } = await queryFulfilled;
+
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getWorkspaceMembers",
+              { workspaceSlug },
+              (draft) => {
+                const member = draft.find((item) => item.userId === userId);
+
+                if (member) {
+                  member.fullName = data.profile.fullName;
+                  member.email = data.profile.email;
+                }
+              },
+            ),
+          );
+        } catch (error) {
+          patches.reverse().forEach((patch) => patch.undo());
+          throw error;
+        }
+      },
+    }),
+    updateWorkspaceSettings: builder.mutation<
+      UpdateWorkspaceSettingsResponse,
+      UpdateWorkspaceSettingsArg
+    >({
+      query: ({ workspaceSlug, payload }) => ({
+        body: payload,
+        method: "PATCH",
+        url: `/workspaces/${workspaceSlug}/settings/workspace`,
+      }),
+    }),
+    inviteWorkspaceMember: builder.mutation<
+      InviteWorkspaceMemberResponse,
+      InviteWorkspaceMemberArg
+    >({
+      query: ({ workspaceSlug, payload }) => ({
+        body: payload,
+        method: "POST",
+        url: `/workspaces/${workspaceSlug}/invitations`,
+      }),
+      invalidatesTags: (_result, error, { workspaceSlug }) =>
+        error ? [] : [createWorkspaceListTag("Invitations", workspaceSlug)],
+      async onQueryStarted(
+        { workspaceSlug, payload, optimistic },
+        { dispatch, queryFulfilled },
+      ) {
+        const tempId = `temp-invitation-${crypto.randomUUID()}`;
+        const patch = dispatch(
+          workspaceApi.util.updateQueryData(
+            "getWorkspaceInvitations",
+            { workspaceSlug },
+            (draft) => {
+              if (!draft.isAvailable) {
+                return;
+              }
+
+              draft.invitations.unshift({
+                createdAt: new Date().toISOString(),
+                email: payload.email.trim().toLowerCase(),
+                id: tempId,
+                invitedByEmail: optimistic.invitedByEmail ?? null,
+                invitedByName: optimistic.invitedByName ?? null,
+                role: "member",
+              });
+            },
+          ),
+        );
+
+        try {
+          const { data } = await queryFulfilled;
+
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getWorkspaceInvitations",
+              { workspaceSlug },
+              (draft) => {
+                const index = draft.invitations.findIndex((item) => item.id === tempId);
+
+                if (index < 0) {
+                  return;
+                }
+
+                if (data.alreadyMember || !data.invitation) {
+                  draft.invitations.splice(index, 1);
+                  return;
+                }
+
+                draft.invitations[index] = data.invitation;
+              },
+            ),
+          );
+        } catch (error) {
+          patch.undo();
+          throw error;
+        }
+      },
+    }),
+    cancelWorkspaceInvitation: builder.mutation<
+      CancelWorkspaceInvitationResponse,
+      CancelWorkspaceInvitationArg
+    >({
+      query: ({ workspaceSlug, invitationId }) => ({
+        method: "DELETE",
+        url: `/workspaces/${workspaceSlug}/invitations/${invitationId}`,
+      }),
+      invalidatesTags: (_result, error, { workspaceSlug, invitationId }) =>
+        error
+          ? []
+          : [
+              createWorkspaceListTag("Invitations", workspaceSlug),
+              { type: "Invitations" as const, id: invitationId },
+            ],
+      async onQueryStarted(
+        { workspaceSlug, invitationId },
+        { dispatch, queryFulfilled },
+      ) {
+        const patch = dispatch(
+          workspaceApi.util.updateQueryData(
+            "getWorkspaceInvitations",
+            { workspaceSlug },
+            (draft) => {
+              const index = draft.invitations.findIndex((item) => item.id === invitationId);
+
+              if (index >= 0) {
+                draft.invitations.splice(index, 1);
+              }
+            },
+          ),
+        );
+
+        try {
+          await queryFulfilled;
+        } catch (error) {
+          patch.undo();
+          throw error;
+        }
+      },
+    }),
+    removeWorkspaceMember: builder.mutation<
+      RemoveWorkspaceMemberResponse,
+      RemoveWorkspaceMemberArg
+    >({
+      query: ({ workspaceSlug, userId }) => ({
+        method: "DELETE",
+        url: `/workspaces/${workspaceSlug}/members/${userId}`,
+      }),
+      invalidatesTags: (_result, error, { workspaceSlug, userId }) =>
+        error
+          ? []
+          : [
+              createWorkspaceListTag("Members", workspaceSlug),
+              createWorkspaceListTag("Contacts", workspaceSlug),
+              { type: "Members" as const, id: userId },
+            ],
+      async onQueryStarted(
+        { workspaceSlug, userId },
+        { dispatch, queryFulfilled },
+      ) {
+        const patch = dispatch(
+          workspaceApi.util.updateQueryData(
+            "getWorkspaceMembers",
+            { workspaceSlug },
+            (draft) => {
+              const index = draft.findIndex((item) => item.userId === userId);
+
+              if (index >= 0) {
+                draft.splice(index, 1);
+              }
+            },
+          ),
+        );
+
+        try {
+          await queryFulfilled;
+        } catch (error) {
+          patch.undo();
+          throw error;
+        }
+      },
+    }),
+    createContact: builder.mutation<CreateContactResponse, CreateContactArg>({
+      query: ({ workspaceSlug, payload }) => ({
+        body: payload,
+        method: "POST",
+        url: `/workspaces/${workspaceSlug}/contacts`,
+      }),
+      invalidatesTags: (_result, error, { workspaceSlug }) =>
+        error
+          ? []
+          : [
+              createWorkspaceListTag("Organizations", workspaceSlug),
+              createWorkspaceListTag("Members", workspaceSlug),
+            ],
+      async onQueryStarted(
+        { workspaceSlug, payload, optimistic },
+        { dispatch, queryFulfilled },
+      ) {
+        const tempId = `temp-contact-${crypto.randomUUID()}`;
+        const optimisticContact: ContactListItem = {
+          created_at: new Date().toISOString(),
+          gmail: normalizeOptionalText(payload.gmail),
+          id: tempId,
+          last_contact_date: null,
+          linkedin: normalizeOptionalText(payload.linkedin),
+          name: payload.name.trim(),
+          note: normalizeOptionalText(payload.note),
+          organization_id: null,
+          organizationName: normalizeOptionalText(payload.organizationName),
+          responsible_user_id: payload.responsibleUserId?.trim() || null,
+          responsibleUserEmail: optimistic.responsibleUserEmail ?? null,
+          responsibleUserName: optimistic.responsibleUserName ?? null,
+          role: normalizeOptionalText(payload.role),
+          status: payload.status,
+          telegram: normalizeOptionalText(payload.telegram),
+          updated_at: new Date().toISOString(),
+          whatsapp: normalizeOptionalText(payload.whatsapp),
+          workspace_id: workspaceSlug,
+        };
+        const patch = dispatch(
+          workspaceApi.util.updateQueryData("getContacts", { workspaceSlug }, (draft) => {
+            draft.unshift(optimisticContact);
+          }),
+        );
+
+        try {
+          const { data } = await queryFulfilled;
+
+          dispatch(
+            workspaceApi.util.updateQueryData("getContacts", { workspaceSlug }, (draft) => {
+              const index = draft.findIndex((item) => item.id === tempId);
+
+              if (index >= 0) {
+                draft[index] = data.contact;
+              } else {
+                draft.unshift(data.contact);
+              }
+            }),
+          );
+        } catch (error) {
+          patch.undo();
+          throw error;
+        }
+      },
+    }),
     updateContact: builder.mutation<UpdateContactResponse, UpdateContactArg>({
       query: ({ workspaceSlug, contactId, payload }) => ({
         body: payload,
@@ -318,6 +711,42 @@ export const workspaceApi = createApi({
           );
         } catch (error) {
           patches.reverse().forEach((patch) => patch.undo());
+          throw error;
+        }
+      },
+    }),
+    deleteContact: builder.mutation<DeleteContactResponse, DeleteContactArg>({
+      query: ({ workspaceSlug, contactId }) => ({
+        method: "DELETE",
+        url: `/workspaces/${workspaceSlug}/contacts/${contactId}`,
+      }),
+      invalidatesTags: (_result, error, { workspaceSlug, contactId }) =>
+        error
+          ? []
+          : [
+              createWorkspaceListTag("Organizations", workspaceSlug),
+              createWorkspaceListTag("Folders", workspaceSlug),
+              createWorkspaceListTag("Activities", workspaceSlug),
+              { type: "Contacts" as const, id: contactId },
+            ],
+      async onQueryStarted(
+        { workspaceSlug, contactId },
+        { dispatch, queryFulfilled },
+      ) {
+        const patch = dispatch(
+          workspaceApi.util.updateQueryData("getContacts", { workspaceSlug }, (draft) => {
+            const index = draft.findIndex((item) => item.id === contactId);
+
+            if (index >= 0) {
+              draft.splice(index, 1);
+            }
+          }),
+        );
+
+        try {
+          await queryFulfilled;
+        } catch (error) {
+          patch.undo();
           throw error;
         }
       },
@@ -433,6 +862,40 @@ export const workspaceApi = createApi({
               }
             }),
           );
+        } catch (error) {
+          patch.undo();
+          throw error;
+        }
+      },
+    }),
+    deleteFolder: builder.mutation<DeleteFolderResponse, DeleteFolderArg>({
+      query: ({ workspaceSlug, folderId }) => ({
+        method: "DELETE",
+        url: `/workspaces/${workspaceSlug}/folders/${folderId}`,
+      }),
+      invalidatesTags: (_result, error, { workspaceSlug, folderId }) =>
+        error
+          ? []
+          : [
+              createWorkspaceListTag("Contacts", workspaceSlug),
+              { type: "Folders" as const, id: folderId },
+            ],
+      async onQueryStarted(
+        { workspaceSlug, folderId },
+        { dispatch, queryFulfilled },
+      ) {
+        const patch = dispatch(
+          workspaceApi.util.updateQueryData("getFolders", { workspaceSlug }, (draft) => {
+            const index = draft.findIndex((item) => item.id === folderId);
+
+            if (index >= 0) {
+              draft.splice(index, 1);
+            }
+          }),
+        );
+
+        try {
+          await queryFulfilled;
         } catch (error) {
           patch.undo();
           throw error;
@@ -686,12 +1149,365 @@ export const workspaceApi = createApi({
         }
       },
     }),
+    updateActivity: builder.mutation<UpdateActivityResponse, UpdateActivityArg>({
+      query: ({ workspaceSlug, activityId, payload }) => ({
+        body: payload,
+        method: "PATCH",
+        url: `/workspaces/${workspaceSlug}/outreach/${activityId}`,
+      }),
+      invalidatesTags: (_result, error, { activityId, contactId, organizationId, workspaceSlug }) =>
+        error
+          ? []
+          : [
+              createWorkspaceListTag("Activities", workspaceSlug),
+              createWorkspaceListTag("Contacts", workspaceSlug),
+              { type: "Activities" as const, id: activityId },
+              { type: "Contacts" as const, id: contactId },
+              ...(organizationId
+                ? [
+                    createWorkspaceListTag("Organizations", workspaceSlug),
+                    { type: "Organizations" as const, id: organizationId },
+                  ]
+                : []),
+            ],
+      async onQueryStarted(
+        { workspaceSlug, activityId, contactId, organizationId, payload },
+        { dispatch, getState, queryFulfilled },
+      ) {
+        const state = getState();
+        const contactDetail = workspaceApi.endpoints.getContactDetail.select({
+          workspaceSlug,
+          contactId,
+        })(state).data;
+        const workspaceActivities = workspaceApi.endpoints.getWorkspaceActivities.select({
+          workspaceSlug,
+        })(state).data;
+        const existingActivity =
+          contactDetail?.activities.find((item) => item.id === activityId) ??
+          workspaceActivities?.find((item) => item.id === activityId);
+        const optimisticActivity: ActivityListItem = {
+          activity_date: new Date(payload.activityDate).toISOString(),
+          contact_id: contactId,
+          contactName: existingActivity?.contactName,
+          content: payload.content.trim(),
+          created_at: existingActivity?.created_at ?? new Date().toISOString(),
+          id: activityId,
+          organization_id: organizationId ?? null,
+          organizationName: existingActivity?.organizationName ?? null,
+          status: payload.status,
+          type: payload.type,
+          workspace_id: existingActivity?.workspace_id ?? workspaceSlug,
+        };
+        const nextContactLastContactDate = contactDetail
+          ? getLastContactDateFromActivities(
+              contactDetail.activities.map((item) =>
+                item.id === activityId ? optimisticActivity : item,
+              ),
+            )
+          : undefined;
+        const patches = [
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getWorkspaceActivities",
+              { workspaceSlug },
+              (draft) => {
+                const index = draft.findIndex((item) => item.id === activityId);
+
+                if (index >= 0) {
+                  draft[index] = optimisticActivity;
+                }
+              },
+            ),
+          ),
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getContactDetail",
+              { workspaceSlug, contactId },
+              (draft) => {
+                const index = draft.activities.findIndex((item) => item.id === activityId);
+
+                if (index >= 0) {
+                  draft.activities[index] = optimisticActivity;
+                }
+
+                if (nextContactLastContactDate !== undefined) {
+                  draft.last_contact_date = nextContactLastContactDate;
+                }
+              },
+            ),
+          ),
+          dispatch(
+            workspaceApi.util.updateQueryData("getContacts", { workspaceSlug }, (draft) => {
+              const contact = draft.find((item) => item.id === contactId);
+
+              if (contact && nextContactLastContactDate !== undefined) {
+                contact.last_contact_date = nextContactLastContactDate;
+              }
+            }),
+          ),
+        ];
+
+        if (organizationId) {
+          patches.push(
+            dispatch(
+              workspaceApi.util.updateQueryData(
+                "getOrganizationDetail",
+                { workspaceSlug, organizationId },
+                (draft) => {
+                  const index = draft.activities.findIndex((item) => item.id === activityId);
+
+                  if (index >= 0) {
+                    draft.activities[index] = optimisticActivity;
+                  }
+
+                  const contact = draft.contacts.find((item) => item.id === contactId);
+
+                  if (contact && nextContactLastContactDate !== undefined) {
+                    contact.last_contact_date = nextContactLastContactDate;
+                  }
+                },
+              ),
+            ),
+          );
+        }
+
+        try {
+          const { data } = await queryFulfilled;
+
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getWorkspaceActivities",
+              { workspaceSlug },
+              (draft) => {
+                const index = draft.findIndex((item) => item.id === activityId);
+
+                if (index >= 0) {
+                  draft[index] = data.activity;
+                }
+              },
+            ),
+          );
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getContactDetail",
+              { workspaceSlug, contactId },
+              (draft) => {
+                const index = draft.activities.findIndex((item) => item.id === activityId);
+
+                if (index >= 0) {
+                  draft.activities[index] = data.activity;
+                }
+
+                draft.last_contact_date = data.contactLastContactDate;
+              },
+            ),
+          );
+          dispatch(
+            workspaceApi.util.updateQueryData("getContacts", { workspaceSlug }, (draft) => {
+              const contact = draft.find((item) => item.id === contactId);
+
+              if (contact) {
+                contact.last_contact_date = data.contactLastContactDate;
+              }
+            }),
+          );
+
+          if (organizationId) {
+            dispatch(
+              workspaceApi.util.updateQueryData(
+                "getOrganizationDetail",
+                { workspaceSlug, organizationId },
+                (draft) => {
+                  const index = draft.activities.findIndex((item) => item.id === activityId);
+
+                  if (index >= 0) {
+                    draft.activities[index] = data.activity;
+                  }
+
+                  const contact = draft.contacts.find((item) => item.id === contactId);
+
+                  if (contact) {
+                    contact.last_contact_date = data.contactLastContactDate;
+                  }
+                },
+              ),
+            );
+          }
+        } catch (error) {
+          patches.reverse().forEach((patch) => patch.undo());
+          throw error;
+        }
+      },
+    }),
+    deleteActivity: builder.mutation<DeleteActivityResponse, DeleteActivityArg>({
+      query: ({ workspaceSlug, activityId }) => ({
+        method: "DELETE",
+        url: `/workspaces/${workspaceSlug}/outreach/${activityId}`,
+      }),
+      invalidatesTags: (_result, error, { activityId, contactId, organizationId, workspaceSlug }) =>
+        error
+          ? []
+          : [
+              createWorkspaceListTag("Activities", workspaceSlug),
+              createWorkspaceListTag("Contacts", workspaceSlug),
+              { type: "Activities" as const, id: activityId },
+              { type: "Contacts" as const, id: contactId },
+              ...(organizationId
+                ? [
+                    createWorkspaceListTag("Organizations", workspaceSlug),
+                    { type: "Organizations" as const, id: organizationId },
+                  ]
+                : []),
+            ],
+      async onQueryStarted(
+        { workspaceSlug, activityId, contactId, organizationId },
+        { dispatch, getState, queryFulfilled },
+      ) {
+        const state = getState();
+        const contactDetail = workspaceApi.endpoints.getContactDetail.select({
+          workspaceSlug,
+          contactId,
+        })(state).data;
+        const nextContactLastContactDate = contactDetail
+          ? getLastContactDateFromActivities(
+              contactDetail.activities.filter((item) => item.id !== activityId),
+            )
+          : undefined;
+        const patches = [
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getWorkspaceActivities",
+              { workspaceSlug },
+              (draft) => {
+                const index = draft.findIndex((item) => item.id === activityId);
+
+                if (index >= 0) {
+                  draft.splice(index, 1);
+                }
+              },
+            ),
+          ),
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getContactDetail",
+              { workspaceSlug, contactId },
+              (draft) => {
+                const index = draft.activities.findIndex((item) => item.id === activityId);
+
+                if (index >= 0) {
+                  draft.activities.splice(index, 1);
+                }
+
+                if (nextContactLastContactDate !== undefined) {
+                  draft.last_contact_date = nextContactLastContactDate;
+                }
+              },
+            ),
+          ),
+          dispatch(
+            workspaceApi.util.updateQueryData("getContacts", { workspaceSlug }, (draft) => {
+              const contact = draft.find((item) => item.id === contactId);
+
+              if (contact && nextContactLastContactDate !== undefined) {
+                contact.last_contact_date = nextContactLastContactDate;
+              }
+            }),
+          ),
+        ];
+
+        if (organizationId) {
+          patches.push(
+            dispatch(
+              workspaceApi.util.updateQueryData(
+                "getOrganizationDetail",
+                { workspaceSlug, organizationId },
+                (draft) => {
+                  const index = draft.activities.findIndex((item) => item.id === activityId);
+
+                  if (index >= 0) {
+                    draft.activities.splice(index, 1);
+                  }
+
+                  const contact = draft.contacts.find((item) => item.id === contactId);
+
+                  if (contact && nextContactLastContactDate !== undefined) {
+                    contact.last_contact_date = nextContactLastContactDate;
+                  }
+                },
+              ),
+            ),
+          );
+          patches.push(
+            dispatch(
+              workspaceApi.util.updateQueryData(
+                "getOrganizations",
+                { workspaceSlug },
+                (draft) => {
+                  const organization = draft.find((item) => item.id === organizationId);
+
+                  if (organization && organization.activityCount > 0) {
+                    organization.activityCount -= 1;
+                  }
+                },
+              ),
+            ),
+          );
+        }
+
+        try {
+          const { data } = await queryFulfilled;
+
+          dispatch(
+            workspaceApi.util.updateQueryData(
+              "getContactDetail",
+              { workspaceSlug, contactId },
+              (draft) => {
+                draft.last_contact_date = data.contactLastContactDate;
+              },
+            ),
+          );
+          dispatch(
+            workspaceApi.util.updateQueryData("getContacts", { workspaceSlug }, (draft) => {
+              const contact = draft.find((item) => item.id === data.contactId);
+
+              if (contact) {
+                contact.last_contact_date = data.contactLastContactDate;
+              }
+            }),
+          );
+
+          if (organizationId) {
+            dispatch(
+              workspaceApi.util.updateQueryData(
+                "getOrganizationDetail",
+                { workspaceSlug, organizationId },
+                (draft) => {
+                  const contact = draft.contacts.find((item) => item.id === data.contactId);
+
+                  if (contact) {
+                    contact.last_contact_date = data.contactLastContactDate;
+                  }
+                },
+              ),
+            );
+          }
+        } catch (error) {
+          patches.reverse().forEach((patch) => patch.undo());
+          throw error;
+        }
+      },
+    }),
   }),
 });
 
 export const {
+  useCancelWorkspaceInvitationMutation,
+  useCreateContactMutation,
   useCreateActivityMutation,
   useCreateFolderMutation,
+  useDeleteContactMutation,
+  useDeleteActivityMutation,
+  useDeleteFolderMutation,
   useGetContactDetailQuery,
   useGetContactsQuery,
   useGetFolderDetailQuery,
@@ -699,8 +1515,14 @@ export const {
   useGetOrganizationDetailQuery,
   useGetOrganizationsQuery,
   useGetWorkspaceActivitiesQuery,
+  useGetWorkspaceInvitationsQuery,
   useGetWorkspaceMembersQuery,
+  useInviteWorkspaceMemberMutation,
+  useRemoveWorkspaceMemberMutation,
   useSyncFolderContactsMutation,
+  useUpdateProfileMutation,
+  useUpdateActivityMutation,
   useUpdateContactMutation,
   useUpdateOrganizationMutation,
+  useUpdateWorkspaceSettingsMutation,
 } = workspaceApi;

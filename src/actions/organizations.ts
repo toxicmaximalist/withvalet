@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
 import { redirectWithMessage } from "@/lib/navigation";
 import { getErrorMessage } from "@/lib/utils";
 import { updateOrganizationRecord } from "@/lib/workspace-mutations";
@@ -23,8 +21,6 @@ export async function updateOrganizationAction(formData: FormData) {
     );
   }
 
-  revalidatePath(`/workspaces/${workspaceSlug}/organizations`);
-  revalidatePath(`/workspaces/${workspaceSlug}/organizations/${organizationId}`);
   redirectWithMessage(
     `/workspaces/${workspaceSlug}/organizations/${organizationId}`,
     "success",

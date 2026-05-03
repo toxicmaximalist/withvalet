@@ -9,24 +9,29 @@ export type Json =
 export type Database = {
   public: {
     Enums: {
-      activity_status: "planned" | "sent" | "replied" | "completed" | "failed";
+      activity_status:
+        | "planned"
+        | "sent"
+        | "replied"
+        | "followed_up_1"
+        | "followed_up_2";
       activity_type:
         | "email"
-        | "linkedin"
-        | "telegram"
-        | "whatsapp"
+        | "linkedin_message"
+        | "follow_up"
         | "call"
-        | "meeting"
-        | "note";
+        | "demo"
+        | "telegram_message";
       contact_status:
-        | "new"
+        | "fresh"
         | "contacted"
         | "replied"
+        | "followed_up"
+        | "call_scheduled"
+        | "call_done"
         | "interested"
         | "not_interested"
-        | "meeting_scheduled"
-        | "closed"
-        | "archived";
+        | "ghosted";
       workspace_role: "owner" | "member";
     };
     CompositeTypes: {

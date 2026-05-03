@@ -11,6 +11,7 @@ import { getMessageValue } from "@/lib/navigation";
 import {
   formatDate,
   getErrorMessage,
+  getSupabaseMigrationGuidance,
   getInitials,
   isSupabaseSchemaError,
 } from "@/lib/utils";
@@ -85,10 +86,7 @@ export default async function WorkspacesPage({ searchParams }: WorkspacesPagePro
               {isSupabaseSchemaError(loadError) ? (
                 <div className="mt-4 space-y-2 text-sm text-muted">
                   <p>This usually means the Supabase migration has not been applied yet.</p>
-                  <p>
-                    Run the SQL in <code>supabase/migrations/0001_initial_schema.sql</code> against your
-                    Supabase project, then refresh this page.
-                  </p>
+                  <p>{getSupabaseMigrationGuidance(loadError)}</p>
                 </div>
               ) : null}
             </div>

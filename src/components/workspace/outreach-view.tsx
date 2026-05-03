@@ -76,7 +76,7 @@ export function OutreachView({
     const selectedContact = contacts.find((contact) => contact.id === contactId);
 
     try {
-      await createActivity({
+      const request = createActivity({
         optimistic: {
           contactLastContactDate: selectedContact?.last_contact_date,
           contactName: selectedContact?.name,
@@ -103,13 +103,18 @@ export function OutreachView({
       }
 
       setIsCreateModalOpen(false);
+      await request;
       showSuccess("Activity logged.");
     } catch (error) {
       showError(getErrorMessage(error));
     }
   }
 
-  const completedCount = activities.filter((activity) => activity.status === "completed").length;
+  const plannedCount = activities.filter((activity) => activity.status === "planned").length;
+  const followUpCount = activities.filter(
+    (activity) =>
+      activity.status === "followed_up_1" || activity.status === "followed_up_2",
+  ).length;
   const repliedCount = activities.filter((activity) => activity.status === "replied").length;
 
   return (
@@ -118,7 +123,7 @@ export function OutreachView({
         <PageHeader
           eyebrow="Workspace outreach"
           title="Outreach"
-          description="Track every planned or completed touchpoint across the workspace."
+          description="Track every scheduled or sent touchpoint across the workspace."
           actions={
             <div className="flex flex-wrap items-center gap-3">
               <button
@@ -213,7 +218,7 @@ export function OutreachView({
           open={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           title="Log workspace activity"
-          description="Capture a completed or planned touchpoint for any contact in this workspace."
+          description="Capture a planned, sent, replied, or follow-up touchpoint for any contact in this workspace."
         >
           <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
             <input type="hidden" name="workspaceSlug" value={workspaceSlug} />
@@ -243,7 +248,7 @@ export function OutreachView({
               </div>
               <div>
                 <FieldLabel htmlFor="status">Status</FieldLabel>
-                <SelectInput id="status" name="status" defaultValue="completed">
+                <SelectInput id="status" name="status" defaultValue="sent">
                   {ACTIVITY_STATUSES.map((status) => (
                     <option key={status} value={status}>
                       {ACTIVITY_STATUS_LABELS[status]}
@@ -283,16 +288,21 @@ export function OutreachView({
           </div>
         ) : (
           <section className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <MetricCard
                 label="Total touchpoints"
                 value={activities.length}
                 detail={activitiesQuery.isFetching ? "Refreshing live data" : "Across the full workspace"}
               />
               <MetricCard
-                label="Completed"
-                value={completedCount}
-                detail="Finished emails, calls, notes, or meetings"
+                label="Planned"
+                value={plannedCount}
+                detail="Scheduled calls, demos, and future follow-ups"
+              />
+              <MetricCard
+                label="Follow-ups"
+                value={followUpCount}
+                detail="First and second follow-up touchpoints logged"
               />
               <MetricCard
                 label="Replies"
@@ -321,7 +331,7 @@ export function OutreachView({
               ) : (
                 <EmptyState
                   title="No outreach recorded"
-                  description="Start logging conversations, emails, and meetings to build the workspace timeline."
+                  description="Start logging LinkedIn messages, emails, follow-ups, calls, demos, and Telegram messages to build the workspace timeline."
                 />
               )}
             </div>
@@ -466,7 +476,7 @@ function WorkspaceActivityDrawer({
               />
               <DrawerMeta
                 icon={ActivityTypeIconForMeta}
-                label="Channel"
+                label="Touchpoint type"
                 value={ACTIVITY_TYPE_LABELS[activity.type]}
               />
             </div>
