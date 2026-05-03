@@ -59,6 +59,10 @@ type FolderDetailArg = WorkspaceSlugArg & {
 };
 
 type UpdateContactArg = ContactDetailArg & {
+  optimistic?: {
+    responsibleUserEmail?: string | null;
+    responsibleUserName?: string | null;
+  };
   payload: UpdateContactPayload;
 };
 
@@ -159,6 +163,7 @@ function normalizeOptionalText(value: string | null | undefined) {
 function applyContactPatch(
   draft: ContactListItem | ContactDetail | (ContactListItem & { selected: boolean }),
   payload: UpdateContactPayload,
+  optimistic?: UpdateContactArg["optimistic"],
 ) {
   const nextOrganizationName = normalizeOptionalText(payload.organizationName);
   const organizationChanged = (draft.organizationName ?? null) !== nextOrganizationName;
@@ -170,8 +175,12 @@ function applyContactPatch(
   draft.note = normalizeOptionalText(payload.note);
   draft.organizationName = nextOrganizationName;
   draft.responsible_user_id = nextResponsibleUserId;
-  draft.responsibleUserEmail = nextResponsibleUserId ? draft.responsibleUserEmail : null;
-  draft.responsibleUserName = nextResponsibleUserId ? draft.responsibleUserName : null;
+  draft.responsibleUserEmail = nextResponsibleUserId
+    ? (optimistic?.responsibleUserEmail ?? draft.responsibleUserEmail)
+    : null;
+  draft.responsibleUserName = nextResponsibleUserId
+    ? (optimistic?.responsibleUserName ?? draft.responsibleUserName)
+    : null;
   draft.role = normalizeOptionalText(payload.role);
   draft.status = payload.status;
   draft.telegram = normalizeOptionalText(payload.telegram);
@@ -662,7 +671,7 @@ export const workspaceApi = createApi({
               createWorkspaceListTag("Folders", workspaceSlug),
             ],
       async onQueryStarted(
-        { workspaceSlug, contactId, payload },
+        { workspaceSlug, contactId, optimistic, payload },
         { dispatch, queryFulfilled },
       ) {
         const patches = [
@@ -671,7 +680,7 @@ export const workspaceApi = createApi({
               "getContactDetail",
               { workspaceSlug, contactId },
               (draft) => {
-                applyContactPatch(draft, payload);
+                applyContactPatch(draft, payload, optimistic);
               },
             ),
           ),
@@ -683,7 +692,7 @@ export const workspaceApi = createApi({
                 const contact = draft.find((item) => item.id === contactId);
 
                 if (contact) {
-                  applyContactPatch(contact, payload);
+                  applyContactPatch(contact, payload, optimistic);
                 }
               },
             ),

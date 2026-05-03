@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
-import { ArrowUpRight, ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ArrowUpRight, Check, ChevronDown } from "lucide-react";
 
 import {
   deleteAllContactsAction,
@@ -54,7 +55,7 @@ export function ContactsView({
   const { data, isFetching, isLoading } = useGetContactsQuery(queryArg, workspaceQueryOptions);
   const membersQuery = useGetWorkspaceMembersQuery(queryArg, workspaceQueryOptions);
   const [createContact, createContactState] = useCreateContactMutation();
-  const [updateContact, updateContactState] = useUpdateContactMutation();
+  const [updateContact] = useUpdateContactMutation();
   const contacts = data ?? [];
   const members = membersQuery.data ?? [];
   const filteredContacts = contacts.filter((contact) => {
@@ -162,6 +163,7 @@ export function ContactsView({
     responsibleUserId: string,
   ) {
     const nextResponsibleUserId = responsibleUserId || "";
+    const responsibleMember = members.find((member) => member.userId === nextResponsibleUserId);
 
     if (
       isOptimisticContact(contact.id) ||
@@ -173,6 +175,10 @@ export function ContactsView({
     try {
       await updateContact({
         contactId: contact.id,
+        optimistic: {
+          responsibleUserEmail: responsibleMember?.email ?? null,
+          responsibleUserName: responsibleMember?.fullName ?? null,
+        },
         payload: buildContactUpdatePayload(contact, {
           responsibleUserId: nextResponsibleUserId,
         }),
@@ -503,7 +509,6 @@ export function ContactsView({
             render: (contact) => (
               <InlineSelectCell
                 disabled={isOptimisticContact(contact.id)}
-                loading={updateContactState.isLoading}
                 onChange={(value) => handleInlineResponsibleChange(contact, value)}
                 options={[
                   { label: "Unassigned", value: "" },
@@ -515,6 +520,7 @@ export function ContactsView({
                 triggerLabel={
                   contact.responsibleUserName || contact.responsibleUserEmail || "Unassigned"
                 }
+                triggerTone={contact.responsible_user_id ? "default" : "muted"}
                 value={contact.responsible_user_id ?? ""}
               />
             ),
@@ -558,7 +564,6 @@ export function ContactsView({
             render: (contact) => (
               <InlineSelectCell
                 disabled={isOptimisticContact(contact.id)}
-                loading={updateContactState.isLoading}
                 onChange={(value) =>
                   handleInlineStatusChange(contact, value as ContactListItem["status"])
                 }
@@ -569,6 +574,7 @@ export function ContactsView({
                 trigger={
                   <StatusBadge status={contact.status} />
                 }
+                triggerTone="badge"
                 value={contact.status}
               />
             ),
@@ -591,65 +597,198 @@ export function ContactsView({
 
 function InlineSelectCell({
   disabled = false,
-  loading = false,
   onChange,
   options,
   trigger,
   triggerLabel,
+  triggerTone = "default",
   value,
 }: {
   disabled?: boolean;
-  loading?: boolean;
   onChange: (value: string) => Promise<void> | void;
   options: Array<{ label: string; value: string }>;
   trigger?: React.ReactNode;
   triggerLabel?: string;
+  triggerTone?: "badge" | "default" | "muted";
   value: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [optimisticValue, setOptimisticValue] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{
+    left: number;
+    top: number;
+    placement: "bottom" | "top";
+    width: number;
+  } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const displayValue =
+    optimisticValue !== null && optimisticValue !== value ? optimisticValue : value;
+  const displayLabel =
+    options.find((option) => option.value === displayValue)?.label ??
+    triggerLabel ??
+    "";
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function updateMenuPosition() {
+      const rect = triggerRef.current?.getBoundingClientRect();
+
+      if (!rect) {
+        return;
+      }
+
+      const width = Math.min(Math.max(rect.width, 220), window.innerWidth - 24);
+      const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
+      const shouldOpenAbove =
+        window.innerHeight - rect.bottom < 280 && rect.top > 280;
+
+      setMenuPosition({
+        left,
+        placement: shouldOpenAbove ? "top" : "bottom",
+        top: shouldOpenAbove ? rect.top - 10 : rect.bottom + 10,
+        width,
+      });
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node | null;
+
+      if (
+        triggerRef.current?.contains(target ?? null) ||
+        menuRef.current?.contains(target ?? null)
+      ) {
+        return;
+      }
+
+      setIsOpen(false);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen]);
 
   async function handleChange(nextValue: string) {
+    if (nextValue === value) {
+      setOptimisticValue(null);
+      setIsOpen(false);
+      return;
+    }
+
+    setIsOpen(false);
     setIsSaving(true);
+    setOptimisticValue(nextValue);
 
     try {
       await onChange(nextValue);
-      setIsOpen(false);
+    } catch (error) {
+      setOptimisticValue(null);
+      throw error;
     } finally {
       setIsSaving(false);
     }
   }
 
-  if (isOpen && !disabled) {
-    return (
-      <SelectInput
-        autoFocus
-        className="min-w-[180px] text-sm"
-        defaultValue={value}
-        disabled={isSaving || loading}
-        onBlur={() => setIsOpen(false)}
-        onChange={(event) => {
-          void handleChange(event.target.value);
-        }}
-      >
-        {options.map((option) => (
-          <option key={option.value || "empty"} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </SelectInput>
-    );
-  }
+  const menu =
+    isOpen && menuPosition
+      ? createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[80] overflow-hidden rounded-[22px] border border-white/12 bg-[#15161a]/98 p-2 shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+            style={{
+              left: menuPosition.left,
+              top: menuPosition.top,
+              transform:
+                menuPosition.placement === "top" ? "translateY(-100%)" : undefined,
+              width: menuPosition.width,
+            }}
+          >
+            <div className="max-h-80 overflow-y-auto">
+              {options.map((option) => {
+                const isSelected = option.value === displayValue;
+
+                return (
+                  <button
+                    key={option.value || "empty"}
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => {
+                      void handleChange(option.value);
+                    }}
+                    className={
+                      isSelected
+                        ? "flex w-full items-center justify-between rounded-2xl bg-white/[0.08] px-3 py-2.5 text-left text-sm font-medium text-foreground transition"
+                        : "flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-sm text-muted transition hover:bg-white/[0.05] hover:text-foreground"
+                    }
+                  >
+                    <span>{option.label}</span>
+                    {isSelected ? (
+                      <Check className="size-4 text-accent" />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
+
+  const triggerClasses =
+    triggerTone === "badge"
+      ? "group inline-flex items-center gap-2 rounded-full bg-transparent pr-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50"
+      : triggerTone === "muted"
+        ? "inline-flex max-w-full items-center gap-2 rounded-full border border-white/8 bg-white/[0.02] px-3 py-1.5 text-left text-sm text-muted transition hover:border-white/16 hover:bg-white/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50"
+        : "inline-flex max-w-full items-center gap-2 rounded-full border border-white/8 bg-white/[0.03] px-3 py-1.5 text-left text-sm text-foreground transition hover:border-white/16 hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
-    <button
-      type="button"
-      disabled={disabled || isSaving || loading}
-      onClick={() => setIsOpen(true)}
-      className="inline-flex items-center gap-2 text-left disabled:cursor-wait disabled:opacity-50"
-    >
-      {trigger ?? <span className="text-sm text-muted">{triggerLabel}</span>}
-      <ChevronDown className="size-3.5 text-muted-foreground" />
-    </button>
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-busy={isSaving}
+        aria-disabled={disabled || isSaving}
+        disabled={disabled}
+        onClick={() => {
+          if (isSaving) {
+            return;
+          }
+
+          setIsOpen((current) => !current);
+        }}
+        aria-expanded={isOpen}
+        className={triggerClasses}
+      >
+        {trigger ?? <span className="truncate">{displayLabel}</span>}
+        <ChevronDown
+          className={`size-3.5 shrink-0 transition ${
+            triggerTone === "badge"
+              ? "text-muted opacity-60 group-hover:opacity-100"
+              : "text-muted-foreground"
+          } ${isOpen ? "rotate-180" : ""}`}
+        />
+      </button>
+      {menu}
+    </>
   );
 }
